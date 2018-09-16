@@ -1,5 +1,6 @@
 import os
 import re
+import sys
 import urllib.request
 
 import boto3
@@ -52,13 +53,13 @@ def download(start_year, end_year, storage_location='patent_xml_zipped'):
         for url in urls:
             local_path = os.path.join(folder_path, url)
             # Get and download zip
-            # resp = requests.get(BASE_URL.format(year)+url)
-            # f = open(local_path, 'wb')
-            # f.write(resp.content)
-            # f.close()
+            resp = requests.get(BASE_URL.format(year) + url)
+            f = open(local_path, 'wb')
+            f.write(resp.content)
+            f.close()
             # Upload to S3
             push_to_s3(local_path, year, url)
-            break  # tmp test TODO: remove break, test full download.
+            # break  # tmp test TODO: remove break, test full download.
     return
 
 
@@ -78,3 +79,7 @@ def push_to_s3(file, year, name, bucket='patent-xml-zipped'):
     # List files downloaded
     s3.meta.client.upload_file(file, bucket, os.path.join(str(year), name))
     return
+
+
+if __name__ == '__main__':
+    download(sys.argv[1], sys.argv[2])
