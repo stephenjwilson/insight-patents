@@ -82,4 +82,4 @@ def push_to_s3(file, year, name, bucket='patent-xml-zipped'):
 
 
 if __name__ == '__main__':
-    download(sys.argv[1], sys.argv[2])
+    download(int(sys.argv[1]), int(sys.argv[2]))
