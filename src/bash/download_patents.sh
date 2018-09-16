@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# Clone the repository
+# Clone the repository # TODO: make this git clone if not exists, else git pull
 git clone https://github.com/stephenjwilson/insight-patents.git
 
 # Install miniconda
@@ -25,6 +25,11 @@ else
     source activate $ENV_NAME
     pip install -r requirements.txt
 fi;
+# Ensure AWS CLI is installed
+pip install awscli --upgrade --user
+
+# Configure aws # TODO: figure out how to automatically do this
+# I manually do aws configure right now
 
 # Run
 python ./src/python/download.py 1976 2018

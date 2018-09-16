@@ -1,18 +1,8 @@
 
 #!/usr/bin/env bash
 
-# Set-Up Env
-ENV_NAME='Insight-Patents'
+# Check if data on S3
 
-ENVS=$(conda env list | awk '{print $1}' )
-if [[ $ENVS = *$ENV_NAME* ]]; then
-   source activate $ENV_NAME
-else
-    # make virtual environment
-    conda create --no-deps -n $ENV_NAME --yes
-    source activate $ENV_NAME
-    pip install -r requirements.txt
-fi;
+# If data not on S3, provision ec2 and download with aws_single_ec2_download.sh
 
-# Run
-python ./src/python/main.py
+# Run script to decompress and process files on ec2 spark cluster

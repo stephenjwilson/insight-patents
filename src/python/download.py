@@ -65,6 +65,9 @@ def download(start_year, end_year, storage_location='patent_xml_zipped'):
             name = re.sub("\D", "", url.split('_')[0])
             push_to_s3(local_path, year, name)
             log.info("Pushed %s", "{}_{}".format(year, name))
+
+            # Remove file
+            os.remove(local_path)
     return
 
 
