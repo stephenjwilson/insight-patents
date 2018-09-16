@@ -1,11 +1,14 @@
+import logging
 import os
 import re
 import sys
 import urllib.request
 
 import boto3
+import requests
 
-# TODO: Add Logging
+logging.basicConfig(level=logging.INFO)
+log = logging.getLogger("download-log")
 BASE_URL = "https://bulkdata.uspto.gov/data/patent/grant/redbook/fulltext/{}/"
 
 
@@ -16,12 +19,12 @@ def get_urls(year):
     :return: returns a list of urls
     """
 
-    zip_regex = re.compile("href=\"([a-z0-9]*?\.zip)\"")
+    zip_regex = re.compile("href=\"([a-z0-9_]*?\.zip)\"")
 
     with urllib.request.urlopen(BASE_URL.format(year)) as response:
         html = response.read().decode('utf-8')
         urls = zip_regex.findall(html)
-
+    log.info("Retrieved %s URLS", '{} {}'.format(year, len(urls)))
     return urls
 
 
@@ -58,8 +61,10 @@ def download(start_year, end_year, storage_location='patent_xml_zipped'):
             f.write(resp.content)
             f.close()
             # Upload to S3
-            push_to_s3(local_path, year, url)
-            # break  # tmp test TODO: remove break, test full download.
+
+            name = re.sub("\D", "", url.split('_')[0])
+            push_to_s3(local_path, year, name)
+            log.info("Pushed %s", "{}_{}".format(year, name))
     return
 
 
@@ -68,7 +73,7 @@ def push_to_s3(file, year, name, bucket='patent-xml-zipped'):
     Uploads a patent to the S3 bucket
     :param file: the local file to upload
     :param year: the year of the patent
-    :param name: a standard name for the patent file TODO: not standard yet
+    :param name: a standard name for the patent file
     :param bucket: the name fo the bucket. Currently defaults to patent-xml-zipped
     :return: None
     """

@@ -4,9 +4,12 @@
 git clone https://github.com/stephenjwilson/insight-patents.git
 
 # Install miniconda
-wget https://repo.continuum.io/miniconda/Miniconda3-latest-Linux-x86_64.sh
-bash Miniconda3-latest-Linux-x86_64.sh -b -p $HOME/miniconda
-export PATH="/home/ubuntu/miniconda/bin:$PATH"
+if ! which conda > /dev/null; then
+    wget https://repo.continuum.io/miniconda/Miniconda3-latest-Linux-x86_64.sh
+    bash Miniconda3-latest-Linux-x86_64.sh -b -p $HOME/miniconda
+    export PATH="$HOME/miniconda/bin:$PATH"
+    echo 'export PATH="$HOME/miniconda/bin:$PATH"' >> $HOME/.bashrc
+fi
 
 cd insight-patents
 # Run the download
