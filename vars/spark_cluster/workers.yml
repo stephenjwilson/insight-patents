@@ -1,8 +1,8 @@
 purchase_type: on_demand
-subnet_id: subnet-0ff1cc191c2638f55
+subnet_id:
 num_instances: 2
-key_name: swilson-IAM-keypair
-security_group_ids: sg-0993650310737e639
+key_name:
+security_group_ids:
 instance_type: m4.large
 tag_name: spark-cluster
 vol_size: 100
