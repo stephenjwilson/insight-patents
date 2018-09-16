@@ -14,12 +14,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-PEG_ROOT=~/pegasus
-
 CLUSTER_NAME=spark-cluster
-
-peg up ${PEG_ROOT}/examples/spark/master.yml &
-peg up ${PEG_ROOT}/examples/spark/workers.yml &
+pwd
+peg up ./vars/spark_cluster/workers.yml &
+peg up ./vars/spark_cluster/master.yml &
 
 wait
 
