@@ -38,6 +38,12 @@
             <artifactId>spark-sql_2.11</artifactId>
             <version>2.3.1</version>
         </dependency>
+        <!-- https://mvnrepository.com/artifact/com.amazonaws/aws-java-sdk -->
+        <dependency>
+            <groupId>com.amazonaws</groupId>
+            <artifactId>aws-java-sdk</artifactId>
+            <version>1.11.409</version>
+        </dependency>
 
         <dependency>
             <groupId>com.github.USPTO</groupId>

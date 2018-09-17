@@ -8,11 +8,13 @@ import Assert._
 import scala.io._
 import net.liftweb.json.parse
 import org.json4s.JObject
-
 import scala.collection.immutable.HashMap
 
+/*
+Tests to check that parsing the USTPO XML is working and creating json files with the right fields
+ */
 @Test
-class parse_test {
+class JSONTest {
 
   @Test
   def test_json(): Unit = {
