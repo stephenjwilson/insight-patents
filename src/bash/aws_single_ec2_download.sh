@@ -8,5 +8,7 @@ INSTANCE_ID=$(aws ec2 run-instances --image-id ami-04169656fea786776 --count 1 -
 
 # Run download script TODO: Figure out why instance id doesn't work
 #aws ssm send-command --document-name "AWS-RunRemoteScript" --instance-ids $INSTANCE_ID --parameters '{"sourceType":["GitHub"],"sourceInfo":["{\"owner\":\"stephenjwilson\", \"repository\": \"$REPO\", \"path\": \"src/bash/download_patents.sh\" }"],"commandLine":["bash download_patents.sh"]}'
+#ssh -i ~/.ssh/swilson-IAM-keypair.pem ubuntu@ 'ls -l; ps -aux; whoami'
+
 
 #aws ec2 terminate-instances --instance-ids $INSTANCE_ID

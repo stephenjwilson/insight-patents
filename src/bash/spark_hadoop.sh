@@ -15,7 +15,7 @@
 # limitations under the License.
 
 CLUSTER_NAME=spark-cluster
-pwd
+
 peg up ./vars/spark_cluster/workers.yml &
 peg up ./vars/spark_cluster/master.yml &
 
@@ -26,5 +26,11 @@ peg fetch ${CLUSTER_NAME}
 peg install ${CLUSTER_NAME} ssh
 peg install ${CLUSTER_NAME} aws
 peg install ${CLUSTER_NAME} environment
+
+# install
+peg sshcmd-cluster ${CLUSTER_NAME} "sudo apt-get install bc"
+
 peg install ${CLUSTER_NAME} hadoop
+peg service ${CLUSTER_NAME} hadoop start
 peg install ${CLUSTER_NAME} spark
+peg service ${CLUSTER_NAME} spark start

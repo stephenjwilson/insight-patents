@@ -38,9 +38,16 @@ Languages:
 * Python 3.6
 * Scala
 
+Technologies:
+* maven
+* spark
+* PostgreSQL
+* Neo4j
+
 Third-Party Libraries:
 * pyspark
 * boto
+
 
 # Running the Code:
 This repository's code can be run with:
