@@ -15,14 +15,9 @@ import psycopg2
 from IPython import embed
 from dotenv import load_dotenv, find_dotenv
 # from py2neo import Graph, Node, Relationship, authenticate
-from neomodel import (config, StructuredNode, StringProperty, Relationship, StructuredRel, DateTimeProperty)
+
 from pyspark import SparkContext
-
-load_dotenv(find_dotenv())
-
-BUCKET_NAME = 'patent-xml-zipped'
-
-config.DATABASE_URL = os.getenv("NEO4J_HOST")
+from neomodel import (config, StructuredNode, StringProperty, Relationship, StructuredRel, DateTimeProperty)
 
 
 class PatentRel(StructuredRel):
@@ -34,6 +29,7 @@ class Patent(StructuredNode):
     patent_number = StringProperty()
     title = StringProperty()
     citation = Relationship('Patent', 'OWNS', model=PatentRel)
+BUCKET_NAME = 'patent-xml-zipped'
 
 
 def parse_v1(file_name):
@@ -181,7 +177,7 @@ def to_csv(list_of_patent_dictionaries, output):
         for citation in patent_dictionary['citlist']:
             edges.append((patent_number, citation))
     OUT.close()
-    to_neo4j(nodes, edges)
+    # to_neo4j(nodes, edges)
 
 
 def to_postgres(csv_file):
@@ -190,7 +186,7 @@ def to_postgres(csv_file):
     :param csv_file:
     :return:
     """
-    logging.log("Pushed {} to postgres".format(csv_file))
+    #logging.log("Pushed {} to postgres".format(csv_file))
     # Connect to postgres
     HOST = os.getenv("POSTGRES_HOST")
     USER = os.getenv("POSTGRES_USER")
@@ -230,6 +226,7 @@ def to_neo4j(nodes, edges):
     :param file_name:
     :return:
     """
+
     # graph = Graph(ip_addr= os.getenv("NEO4J_IP"), username = "neo4j", password = os.getenv("NEO4J_PASSWORD"))
     # query = """
     # LOAD CSV WITH HEADERS FROM "%s" AS line
@@ -243,7 +240,7 @@ def to_neo4j(nodes, edges):
     # node_d ={}
     # for node in nodes:
     #     node_d[node['patent_number']] = Patent.create_or_update(node)[0].save()
-
+    config.DATABASE_URL = os.getenv("NEO4J_HOST")
     node_d = {}
     for node in nodes:
         node_d[node[0]] = Patent.nodes.get_or_none(patent_number=node[0])
@@ -325,6 +322,8 @@ def process(key):
     :param key:
     :return:
     """
+    print(key)
+    load_dotenv(find_dotenv())
     file_name = download_from_s3(key)
     decompress_name = decompress(file_name)
     gen, parser = determine_patent_type(decompress_name)
@@ -345,6 +344,7 @@ def main():
     :return:
     """
     sc = SparkContext().getOrCreate()
+
     s3 = boto3.resource('s3')
     my_bucket = s3.Bucket(BUCKET_NAME)
     keys_to_process = []
@@ -355,7 +355,7 @@ def main():
         if len(keys_to_process) > 2:
             break
     keys_to_process = sc.parallelize(keys_to_process)
-    keys_to_process.map(process)
+    keys_to_process.map(process).collect()
     # for key in keys_to_process:
     #     process(key)
 
