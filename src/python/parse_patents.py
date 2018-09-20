@@ -14,21 +14,9 @@ from itertools import chain
 import psycopg2
 from IPython import embed
 from dotenv import load_dotenv, find_dotenv
-# from py2neo import Graph, Node, Relationship, authenticate
-
+from neo4j.v1 import GraphDatabase
 from pyspark import SparkContext
-from neomodel import (config, StructuredNode, StringProperty, Relationship, StructuredRel, DateTimeProperty)
 
-
-class PatentRel(StructuredRel):
-    since = DateTimeProperty()
-    met = StringProperty()
-
-
-class Patent(StructuredNode):
-    patent_number = StringProperty()
-    title = StringProperty()
-    citation = Relationship('Patent', 'OWNS', model=PatentRel)
 BUCKET_NAME = 'patent-xml-zipped'
 
 
@@ -148,6 +136,9 @@ def to_csv(list_of_patent_dictionaries, output):
     fields = ['patnum', 'filedate', 'title', 'grantdate', 'owner', 'city', 'state', 'country', 'class']
     OUT = open(output, 'w')
 
+    OUT2 = open(output.replace('.csv', '') + '_edges.csv', 'w')
+    OUT2.write("patent_number\tcitation\n")
+
     # OUT.write('\t'.join(fields) + '\tipcs\n')
     nodes = []
     edges = []
@@ -175,9 +166,11 @@ def to_csv(list_of_patent_dictionaries, output):
         patent_number = patent_dictionary['patnum']
         nodes.append((patent_number, patent_dictionary['title']))
         for citation in patent_dictionary['citlist']:
-            edges.append((patent_number, citation))
+            # edges.append((patent_number, citation))
+            OUT2.write("{}\t{}\n".format(patent_number, citation))
     OUT.close()
-    # to_neo4j(nodes, edges)
+    OUT2.close()
+    new_neo4j(output, output.replace('.csv', '') + '_edges.csv')
 
 
 def to_postgres(csv_file):
@@ -220,42 +213,43 @@ def to_postgres(csv_file):
     conn.close()
 
 
-def to_neo4j(nodes, edges):
+def new_neo4j(csv_nodes, csv_edges):
     """
-    TODO: swich to load CSV or other bulk methods
-    :param file_name:
+
+    :param csv_nodes:
+    :param csv_edges:
     :return:
     """
+    # Set-Up Patents
+    driver = GraphDatabase.driver(os.getenv("NEO4J_URI"), auth=("neo4j", os.getenv("NEO4J_PASSWORD")))
+    session = driver.session()
+    # Add Index and Constraints
+    # query = '''CREATE INDEX ON :Patent(patent_number)'''
+    # session.run(query)
+    query = '''CREATE CONSTRAINT ON (p:Patent) ASSERT p.patent_number IS UNIQUE'''
+    session.run(query)
 
-    # graph = Graph(ip_addr= os.getenv("NEO4J_IP"), username = "neo4j", password = os.getenv("NEO4J_PASSWORD"))
-    # query = """
-    # LOAD CSV WITH HEADERS FROM "%s" AS line
-    # WITH line
-    # WHERE line.citation IS NOT NULL
-    # MERGE(patent: Patent{patent_number: line.patent_number, title: line.title})
-    # MERGE(patent) -> (line.citation)""" % file_name
-    # graph.run(query)
-    # embed()
-    # exit()
-    # node_d ={}
-    # for node in nodes:
-    #     node_d[node['patent_number']] = Patent.create_or_update(node)[0].save()
-    config.DATABASE_URL = os.getenv("NEO4J_HOST")
-    node_d = {}
-    for node in nodes:
-        node_d[node[0]] = Patent.nodes.get_or_none(patent_number=node[0])
-        if node_d[node[0]] is None:
-            node_d[node[0]] = Patent(patent_number=node[0], title=node[1]).save()
-        else:
-            node_d[node[0]].title = node[1]
+    session.sync()
+    # Add Patents
+    query = '''
+    LOAD CSV WITH HEADERS FROM "file://%s"
+    AS csvLine
+    MERGE (p: Patent {id: csvLine.patnum, title: csvLine.title})
+    ON CREATE SET p = {id: csvLine.patnum, title: csvLine.title}
+    ON MATCH SET p += {id: csvLine.patnum, title: csvLine.title}''' % os.path.abspath(csv_nodes)
+    session.run(query)
 
-    for edge in edges:
-        # Patent.get_or_create(edge[0]).citation.connect(Patent.get_or_create(edge[1]))
-        try:
-            node_d[edge[0]].citation.connect(node_d[edge[1]])
-        except KeyError:
-            node_d[edge[1]] = Patent(patent_num=edge[1]).save()  # TODO: ensure edge[1] gets title later
-            node_d[edge[0]].citation.connect(node_d[edge[1]])
+    # Set up Patent Relationships
+    session.sync()
+    query = '''
+    LOAD CSV WITH HEADERS FROM "%s"
+    AS csvLine
+    MATCH (p: Patent {id: csvLine.patent_number}),
+        (citation: Patent {id: csvLine.citation})
+    CREATE (patent)-[:CITED]->(citation)
+    ''' % csv_edges
+    session.run(query)
+    session.sync()
 
 
 def determine_patent_type(file_name):
@@ -354,10 +348,10 @@ def main():
         keys_to_process.append(my_object.key)
         if len(keys_to_process) > 2:
             break
-    keys_to_process = sc.parallelize(keys_to_process)
-    keys_to_process.map(process).collect()
-    # for key in keys_to_process:
-    #     process(key)
+    # keys_to_process = sc.parallelize(keys_to_process)
+    # keys_to_process.map(process).collect()
+    for key in keys_to_process:
+        process(key)
 
 
 if __name__ == '__main__':
