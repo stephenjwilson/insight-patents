@@ -24,6 +24,7 @@ def parse_v1(file_name):
     """
     Parses v1 of the patent data.
     Credit goes to https://github.com/iamlemec/patents/blob/master/parse_grants.py#L18
+    TODO: Rewrite / optimize this parser
     :return:
     """
     pat = None
@@ -110,7 +111,7 @@ def parse_v1(file_name):
 
 def parse_v2():
     """
-    Parses v2 of the patent data
+    Parses v2 of the patent data TODO: Create this parser
     :return:
     """
     return
@@ -118,28 +119,29 @@ def parse_v2():
 
 def parse_v3():
     """
-    Parses v3 of the patent data
+    Parses v3 of the patent data. TODO: Create this parser
     :return:
     """
     return
 
 
-# Ensure it's a grant?
+# TODO: Ensure it's a grant?
 
-
-def to_csv(list_of_patent_dictionaries, output):
+def to_csv(list_of_patent_dictionaries, output, sep=','):
     """
     Takes a list_of_patent_dictionaries and outputs a csv that can be uploaded into postgres
-    :param patent_dictionary:
-    :return:
+    :param list_of_patent_dictionaries:
+    :param output
+    :param sep
+    :return: postgres file, neo4j nodes file, neo4j edges file
     """
     fields = ['patnum', 'filedate', 'title', 'grantdate', 'owner', 'city', 'state', 'country', 'class']
-    OUT = open(output, 'w')
+    OUT = open(output, 'w')  # input into postgres
+    OUT2 = open(output.replace('.csv', '') + '_nodes.csv', 'w')  # input into neo4j nodes
+    OUT3 = open(output.replace('.csv', '') + '_edges.csv', 'w')  # input into neo4j edges
+    OUT3.write("patent_number{}citation\n".format(sep))
 
-    OUT2 = open(output.replace('.csv', '') + '_edges.csv', 'w')
-    OUT2.write("patent_number\tcitation\n")
-
-    # OUT.write('\t'.join(fields) + '\tipcs\n')
+    OUT2.write(sep.join(fields) + '{}ipcs\n'.format(sep))
     nodes = []
     edges = []
 
@@ -149,28 +151,30 @@ def to_csv(list_of_patent_dictionaries, output):
         # Deal with all other fields
         for field in fields:
             if field in patent_dictionary:
-                val = patent_dictionary[field]
+                val = patent_dictionary[field].replace('"', '').replace(",", '')
                 if 'date' in field:
                     val = datetime.datetime.strptime(str(val), '%Y%m%d').strftime('%Y-%m-%d')
-                s += '"{}"\t'.format(val)
+                s += '"{}"{}'.format(val.strip(), sep)
             else:
-                s += "\t"
+                s += sep
 
         # Deal with ipcs
         ipcdata = '|'.join(["{}-{}".format(ipc[0], ipc[1]) for ipc in patent_dictionary['ipclist']])
-        s += ipcdata + '\t'
+        s += ipcdata + sep
 
         OUT.write(s[:-1] + "\n")
+        OUT2.write(s[:-1] + "\n")
 
         # Deal with citations
         patent_number = patent_dictionary['patnum']
         nodes.append((patent_number, patent_dictionary['title']))
         for citation in patent_dictionary['citlist']:
             # edges.append((patent_number, citation))
-            OUT2.write("{}\t{}\n".format(patent_number, citation))
+            OUT3.write("{}{}{}\n".format(patent_number, sep, citation))
     OUT.close()
     OUT2.close()
-    new_neo4j(output, output.replace('.csv', '') + '_edges.csv')
+    OUT3.close()
+    return output, output.replace('.csv', '') + '_nodes.csv', output.replace('.csv', '') + '_edges.csv'
 
 
 def to_postgres(csv_file):
@@ -208,7 +212,7 @@ def to_postgres(csv_file):
     # Upload data
 
     cur.copy_from(open(csv_file), 'patents', columns=('patnum', 'filedate', 'title', 'grantdate', 'owner', 'city',
-                                                      'state', 'country', 'class', 'ipc'))
+                                                      'state', 'country', 'class', 'ipc'), sep=',')
     conn.commit()
     conn.close()
 
@@ -232,21 +236,22 @@ def new_neo4j(csv_nodes, csv_edges):
     session.sync()
     # Add Patents
     query = '''
-    LOAD CSV WITH HEADERS FROM "file://%s"
+    LOAD CSV WITH HEADERS FROM "https://s3.amazonaws.com/tmpbucketpatents/%s"
     AS csvLine
-    MERGE (p: Patent {id: csvLine.patnum, title: csvLine.title})
-    ON CREATE SET p = {id: csvLine.patnum, title: csvLine.title}
-    ON MATCH SET p += {id: csvLine.patnum, title: csvLine.title}''' % os.path.abspath(csv_nodes)
+    MERGE (p: Patent {patent_number: csvLine.patnum, title: csvLine.title})
+    ON CREATE SET p = {patent_number: csvLine.patnum, title: csvLine.title}
+    ON MATCH SET p += {patent_number: csvLine.patnum, title: csvLine.title}''' % csv_nodes
     session.run(query)
 
     # Set up Patent Relationships
     session.sync()
+
     query = '''
-    LOAD CSV WITH HEADERS FROM "%s"
+    LOAD CSV WITH HEADERS FROM "https://s3.amazonaws.com/tmpbucketpatents/%s"
     AS csvLine
-    MATCH (p: Patent {id: csvLine.patent_number}),
-        (citation: Patent {id: csvLine.citation})
-    CREATE (patent)-[:CITED]->(citation)
+    MERGE (f: Patent {patent_number: csvLine.patent_number})
+    MERGE (t: Patent {patent_number: csvLine.citation})
+    MERGE (f)-[:CITES]->(t)
     ''' % csv_edges
     session.run(query)
     session.sync()
@@ -310,6 +315,20 @@ def download_from_s3(key, output_name=None):
     return output_name
 
 
+def push_to_s3(key, file_name, bucket=None):
+    """
+
+    :param key:
+    :param file_name:
+    :return:
+    """
+    if bucket is None:
+        bucket = BUCKET_NAME
+    s3 = boto3.resource('s3')
+    my_bucket = s3.Bucket(bucket)
+    my_bucket.put_object(Key=key, Body=open(file_name, 'rb'))
+
+
 def process(key):
     """
 
@@ -317,19 +336,34 @@ def process(key):
     :return:
     """
     print(key)
+    # Load environment variables
     load_dotenv(find_dotenv())
+    # Download, decompress, and determine format of data
     file_name = download_from_s3(key)
     decompress_name = decompress(file_name)
     gen, parser = determine_patent_type(decompress_name)
+
+    # Parse Data and output to csv
     patents = parser(decompress_name)
     output_file = key.replace('/', '_') + '.csv'
-    to_csv(patents, output_file)
+    output_file, output_file2, output_file3 = to_csv(patents, output_file)
+
+    # Dump patent data to Postgres
     to_postgres(output_file)
-    # TODO: clean up all files
+
+    # Push intermediate files to s3
+    fl1 = key + '_nodes.csv'
+    fl2 = key + '_edges.csv'
+    push_to_s3(fl1, output_file2, bucket="tmpbucketpatents")
+    push_to_s3(fl2, output_file3, bucket="tmpbucketpatents")
+
+    # Use intermediate files on s3 to load into neo4j
+    new_neo4j(fl1, fl2)
+    # TODO: clean up local files
     # Clean Up files
-    # os.remove(file_name)
-    # os.remove(decompress_name)
-    # os.remove(output_file)
+    os.remove(file_name)
+    os.remove(decompress_name)
+    os.remove(output_file)
 
 
 def main():
@@ -346,12 +380,12 @@ def main():
         if ".json" in my_object.key:
             continue
         keys_to_process.append(my_object.key)
-        if len(keys_to_process) > 2:
+        if len(keys_to_process) > 3:
             break
-    # keys_to_process = sc.parallelize(keys_to_process)
-    # keys_to_process.map(process).collect()
-    for key in keys_to_process:
-        process(key)
+    keys_to_process = sc.parallelize(keys_to_process)
+    keys_to_process.map(process).collect()
+    # for key in keys_to_process:
+    #     process(key)
 
 
 if __name__ == '__main__':
