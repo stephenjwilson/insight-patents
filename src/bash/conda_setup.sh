@@ -9,5 +9,5 @@ fi
 # Create environment
 /home/ubuntu/anaconda3/bin/conda create --name insight_patents -y
 # Install requirement
-while read requirement; do /home/ubuntu/anaconda3/bin/conda install --yes $requirement; done < /home/ubuntu/insight-patents/requirements.txt
+while read requirement; do /home/ubuntu/anaconda3/bin/conda install -n insight_patents --yes $requirement; done < /home/ubuntu/insight-patents/requirements.txt
 
