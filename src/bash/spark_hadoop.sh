@@ -14,7 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-CLUSTER_NAME=spark-cluster
+export CLUSTER_NAME=spark-cluster
 
 peg up ./vars/spark_cluster/workers.yml &
 peg up ./vars/spark_cluster/master.yml &
@@ -34,3 +34,16 @@ peg install ${CLUSTER_NAME} hadoop
 peg service ${CLUSTER_NAME} hadoop start
 peg install ${CLUSTER_NAME} spark
 peg service ${CLUSTER_NAME} spark start
+
+# Transfer ENV
+peg scp to-rem ${CLUSTER_NAME} 1 .env /home/ubuntu
+peg scp to-rem ${CLUSTER_NAME} 2 .env /home/ubuntu
+peg scp to-rem ${CLUSTER_NAME} 3 .env /home/ubuntu
+peg scp to-rem ${CLUSTER_NAME} 4 .env /home/ubuntu
+peg scp to-rem ${CLUSTER_NAME} 5 .env /home/ubuntu
+
+# git clone project
+peg sshcmd-cluster ${CLUSTER_NAME} "git clone https://github.com/stephenjwilson/insight-patents.git"
+
+# set-up python env
+peg sshcmd-cluster ${CLUSTER_NAME} "cd insight-patents; bash ./src/bash/conda_setup.sh"
