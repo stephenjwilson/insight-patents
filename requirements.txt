@@ -5,4 +5,4 @@ requests==2.18.4
 psycopg2
 python-dotenv
 IPython
-neo4j
+neo4j-driver==1.6.2
