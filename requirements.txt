@@ -1,6 +1,9 @@
+python=3.6
 boto3==1.7.61
+botocore
 pyspark==2.3.1
 requests==2.18.4
 psycopg2
 python-dotenv
-neomodel
+IPython
+neo4j
