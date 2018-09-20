@@ -7,7 +7,7 @@ if ! which conda > /dev/null; then
     export PATH="$HOME/anaconda3/bin:$PATH"
 fi
 # Create environment
-/home/ubuntu/anaconda3/bin/conda env create -n insight-patent
+/home/ubuntu/anaconda3/bin/conda create --name insight_patents -y
 # Install requirement
 while read requirement; do /home/ubuntu/anaconda3/bin/conda install --yes $requirement; done < /home/ubuntu/insight-patents/requirements.txt
 
