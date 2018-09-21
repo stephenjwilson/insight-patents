@@ -1,0 +1,65 @@
+{
+  "variables": {
+    "aws_access_key": "{{env `AWS_ACCESS_KEY_ID`}}",
+    "aws_secret_key": "{{env `AWS_SECRET_ACCESS_KEY`}}",
+    "base_ebs_hvm_ami": "ami-0ac019f4fcb7cb7e6",
+    "home_path": "{{env `HOME`}}"
+  },
+  "builders": [
+    {
+      "access_key": "{{user `aws_access_key`}}",
+      "ami_block_device_mappings": [
+        {
+          "delete_on_termination": true,
+          "device_name": "/dev/sda1",
+          "volume_size": 2000,
+          "volume_type": "gp2"
+        }
+      ],
+      "ami_description": "Custom Spark HVM AMI",
+      "ami_groups": [
+        "all"
+      ],
+      "ami_name": "Custom Spark Base HVM {{timestamp}}",
+      "ami_virtualization_type": "hvm",
+      "communicator": "ssh",
+      "instance_type": "t2.small",
+      "name": "spark:base:us-east-1:ebs:hvm",
+      "region": "us-east-1",
+      "secret_key": "{{user `aws_secret_key`}}",
+      "source_ami": "{{user `base_ebs_hvm_ami`}}",
+      "ssh_keypair_name": "swilson-IAM-keypair",
+      "ssh_private_key_file": "{{user `home_path`}}/.ssh/swilson-IAM-keypair.pem",
+      "ssh_pty": true,
+      "ssh_username": "ubuntu",
+      "type": "amazon-ebs",
+      "tags": {
+        "Spark Version": "2.3.1"
+      },
+      "ami_regions": [
+        "us-east-1"
+      ]
+    }
+  ],
+  "provisioners": [
+    {
+      "type": "shell",
+      "inline": [
+        "mkdir -p /tmp"
+      ]
+    },
+    {
+      "type": "file",
+      "source": "/Users/wilson/Downloads/spark-2.3.1/spark-2.3.1-bin-custom-spark.tgz",
+      "destination": "/tmp/spark-2.3.1-bin-custom-spark.tgz"
+    },
+    {
+      "execute_command": "sudo chmod +x {{ .Path }}; {{ .Vars }} sudo -E bash -x '{{ .Path }}'",
+      "pause_before": "10s",
+      "scripts": [
+        "./setup-ami-machine.sh"
+      ],
+      "type": "shell"
+    }
+  ]
+}
