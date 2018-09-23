@@ -1,83 +1,61 @@
 """
-
+The main run script of the pipeline. It includes a main function that is used in spark submit.
 """
 
-import os
-import shutil
-import boto3
-import datetime
 import logging
+import os
 import zipfile
-import botocore
 
+import boto3
+import botocore
 import psycopg2
-from IPython import embed
 from dotenv import load_dotenv, find_dotenv
 from neo4j.v1 import GraphDatabase
 from pyspark import SparkContext
-from parsers import determine_patent_type
+
+try:
+    from src.python.parsers import PatentParser
+except:
+    from parsers import PatentParser
 BUCKET_NAME = 'patent-xml-zipped'
 
-# TODO: Ensure it's a grant?
 
-
-def to_csv(list_of_patent_dictionaries, output, sep=','):
+def to_csv(list_of_patents, output, sep=','):
     """
     Takes a list_of_patent_dictionaries and outputs a csv that can be uploaded into postgres
-    :param list_of_patent_dictionaries:
-    :param output
-    :param sep
+    :param list_of_patents: A list of Patent objects
+    :param output: The file name used to output the files
+    :param sep: The separator for the csv file
     :return: postgres file, neo4j nodes file, neo4j edges file
     """
-    fields = ['patnum', 'filedate', 'title', 'grantdate', 'owner', 'city', 'state', 'country', 'class']
+    fields = ['patent_number', 'file_date', 'title', 'grant_date', 'owner', 'country', 'ipcs']  # TODO: add abstract?
     OUT = open(output, 'w')  # input into postgres
     OUT2 = open(output.replace('.csv', '') + '_nodes.csv', 'w')  # input into neo4j nodes
     OUT3 = open(output.replace('.csv', '') + '_edges.csv', 'w')  # input into neo4j edges
     OUT3.write("patent_number{}citation\n".format(sep))
 
     OUT2.write(sep.join(fields) + '{}ipcs\n'.format(sep))
-    nodes = []
-    edges = []
 
-    for patent_dictionary in list_of_patent_dictionaries:
+    for patent in list_of_patents:
+        s = patent.to_csv(fields, sep=sep)
+        OUT.write(s)
+        OUT2.write(s)
 
-        s = ''
-        # Deal with all other fields
-        for field in fields:
-            if field in patent_dictionary:
-                val = patent_dictionary[field].replace('"', '').replace(",", '')
-                if 'date' in field:
-                    val = datetime.datetime.strptime(str(val), '%Y%m%d').strftime('%Y-%m-%d')
-                s += '"{}"{}'.format(val.strip(), sep)
-            else:
-                s += sep
-
-        # Deal with ipcs
-        ipcdata = '|'.join(["{}-{}".format(ipc[0], ipc[1]) for ipc in patent_dictionary['ipclist']])
-        s += ipcdata + sep
-
-        OUT.write(s[:-1] + "\n")
-        OUT2.write(s[:-1] + "\n")
-
-        # Deal with citations
-        patent_number = patent_dictionary['patnum']
-        nodes.append((patent_number, patent_dictionary['title']))
-        for citation in patent_dictionary['citlist']:
-            # edges.append((patent_number, citation))
-            OUT3.write("{}{}{}\n".format(patent_number, sep, citation))
+        # Deal with relationships
+        OUT3.write(patent.to_neo4j_relationships())
     OUT.close()
     OUT2.close()
     OUT3.close()
     return output, output.replace('.csv', '') + '_nodes.csv', output.replace('.csv', '') + '_edges.csv'
 
 
-def to_postgres(csv_file):
+def ensure_postgres():
     """
-    Do a bulk upload to postgres
-    :param csv_file:
+    Ensures the appropriate postgres table exists
     :return:
     """
-    #logging.log("Pushed {} to postgres".format(csv_file))
+    # Load environment variables
+    load_dotenv(find_dotenv())
     # Connect to postgres
     HOST = os.getenv("POSTGRES_HOST")
     USER = os.getenv("POSTGRES_USER")
@@ -90,31 +68,45 @@ def to_postgres(csv_file):
     cur = conn.cursor()
     cur.execute("""
     CREATE TABLE IF NOT EXISTS patents(
-        patnum text PRIMARY KEY,
-        filedate date,
+        patent_number text PRIMARY KEY,
+        file_date date,
         title text,
-        grantdate date,
+        grant_date date,
         owner text,
-        city text,
-        state text,
         country text,
-        class text,
         ipc text
     )
     """)
-
-    # Upload data
-
-    cur.copy_from(open(csv_file), 'patents', columns=('patnum', 'filedate', 'title', 'grantdate', 'owner', 'city',
-                                                      'state', 'country', 'class', 'ipc'), sep=',')
     conn.commit()
     conn.close()
 
 
-def new_neo4j(csv_nodes, csv_edges):
+def to_postgres(csv_file):
+    """
+    Do a bulk upload of a csv file to a PostgreSQL database.
+    :param csv_file: The name of the csv file to upload
     """
 
-    :param csv_nodes:
+    # Connect to postgres
+    HOST = os.getenv("POSTGRES_HOST")
+    USER = os.getenv("POSTGRES_USER")
+    PASS = os.getenv("POSTGRES_PASSWORD")
+
+    conn = psycopg2.connect(host=HOST, dbname="patent_data",
+                            user=USER, password=PASS)
+
+    # Upload data
+    cur = conn.cursor()
+    cur.copy_from(open(csv_file), 'patents', columns=('patent_number', 'file_date', 'title', 'grant_date', 'owner',
+                                                      'country', 'ipc'), sep=',')
+    conn.commit()
+    conn.close()
+
+
+def to_neo4j(csv_nodes, csv_edges):
+    """
+    Code and Cyper commands needed to upload the relationship data to neo4j.
+    :param csv_nodes: the file that contains the node information
     :param csv_edges:
     :return:
     """
@@ -128,13 +120,13 @@ def new_neo4j(csv_nodes, csv_edges):
     session.run(query)
 
     session.sync()
-    # Add Patents
+    # Add Patents TODO: add other fields
     query = '''
     LOAD CSV WITH HEADERS FROM "https://s3.amazonaws.com/tmpbucketpatents/%s"
     AS csvLine
-    MERGE (p: Patent {patent_number: csvLine.patnum, title: csvLine.title})
-    ON CREATE SET p = {patent_number: csvLine.patnum, title: csvLine.title}
-    ON MATCH SET p += {patent_number: csvLine.patnum, title: csvLine.title}''' % csv_nodes
+    MERGE (p: Patent {patent_number: csvLine.patent_number, title: csvLine.title})
+    ON CREATE SET p = {patent_number: csvLine.patent_number, title: csvLine.title}
+    ON MATCH SET p += {patent_number: csvLine.patent_number, title: csvLine.title}''' % csv_nodes
     session.run(query)
 
     # Set up Patent Relationships
@@ -154,7 +146,7 @@ def new_neo4j(csv_nodes, csv_edges):
 def decompress(file_name):
     """
     Decompresses the file.  TODO: consider extracting to memory instead of disk
-    :return:
+    :return: Returns the name of the decompressed file
     """
     zip_ref = zipfile.ZipFile(file_name, 'r')
     out_name = zip_ref.filelist[0].filename
@@ -163,17 +155,25 @@ def decompress(file_name):
     return out_name
 
 
-def download_from_s3(key, output_name=None):
+def download_from_s3(key, output_name=None, bucket=None):
     """
-
-    :param key:
-    :param output_name:
+    Downloads a particular file from an S3 bucket
+    :param key: The file key in the S3 bucket
+    :param output_name: What to save the file as locally
+    :param bucket: The name of the S3 bucket. Can be retrieved from the variable BUCKET_NAME
     :return:
     """
+    if bucket is None:
+        bucket = BUCKET_NAME
     if output_name is None:
         output_name = key.replace('/', '_')
+
+    # Only download if needed
+    if os.path.exists(output_name):
+        return output_name
+
     s3 = boto3.resource('s3')
-    my_bucket = s3.Bucket(BUCKET_NAME)
+    my_bucket = s3.Bucket(bucket)
     if os.path.exists(output_name):
         return output_name
     try:
@@ -188,9 +188,10 @@ def download_from_s3(key, output_name=None):
 
 def push_to_s3(key, file_name, bucket=None):
     """
-
-    :param key:
-    :param file_name:
+    Uploads a file to the s3 bucket.
+    :param key: The file key in the S3 bucket
+    :param file_name: The name of the local file
+    :param bucket: The name of the S3 bucket. Can be retrieved from the variable BUCKET_NAME
     :return:
     """
     if bucket is None:
@@ -202,28 +203,29 @@ def push_to_s3(key, file_name, bucket=None):
 
 def process(key):
     """
-
-    :param key:
-    :return:
+    Applys an ETL pipeline for patents on a particular key from a S3 bucket
+    :param key: This is the key for the S3 Bucket
     """
-    print(key)
+    logging.basicConfig(format='%(levelname)s:%(message)s', level=logging.INFO)
+    logging.info("Starting {}".format(key))
     # Load environment variables
     load_dotenv(find_dotenv())
     # Download, decompress, and determine format of data
     file_name = download_from_s3(key)
     decompress_name = decompress(file_name)
-    gen, parser = determine_patent_type(decompress_name)
 
     # Parse Data and output to csv
-    patents = parser(decompress_name)
+    patent_parser = PatentParser(decompress_name)
     output_file = key.replace('/', '_') + '.csv'
-    output_file, output_file2, output_file3 = to_csv(patents, output_file)
+    logging.info("Parsed {}".format(key))
+    output_file, output_file2, output_file3 = to_csv(patent_parser.patents, output_file)
 
     # Dump patent data to Postgres
     try:
         to_postgres(output_file)
     except psycopg2.IntegrityError:
         pass
+    logging.info("Pushed {} to PostgreSQL".format(key))
 
     # Push intermediate files to s3
     fl1 = key + '_nodes.csv'
@@ -232,7 +234,8 @@ def process(key):
     push_to_s3(fl2, output_file3, bucket="tmpbucketpatents")
 
     # Use intermediate files on s3 to load into neo4j
-    new_neo4j(fl1, fl2)
+    to_neo4j(fl1, fl2)
+    logging.info("Pushed {} to Neo4j".format(key))
 
     # Clean Up files
     os.remove(file_name)
@@ -244,11 +247,15 @@ def process(key):
 
 def main():
     """
-    Main Function that downloads, decompresses, and parses the USTPO XML data
+    Main Function that downloads, decompresses, and parses the USTPO XML data before dumping it into a
+    PostgreSQL and a Neo4j database.
     :return:
     """
-    sc = SparkContext().getOrCreate()
 
+    # Ensure that the postgres table is there
+    ensure_postgres()
+
+    # Get list of keys to process
     s3 = boto3.resource('s3')
     my_bucket = s3.Bucket(BUCKET_NAME)
     keys_to_process = []
@@ -258,13 +265,18 @@ def main():
         keys_to_process.append(my_object.key)
         if len(keys_to_process) > 20:
             break
+    # Create Spark job
+    sc = SparkContext().getOrCreate()
     keys_to_process = sc.parallelize(keys_to_process)
     keys_to_process.map(process).collect()
 
     # For Dev
     # for key in keys_to_process:
     #     process(key)
+    #     break
+    # process('1976/19760106')
     # process('2003/030107')
+    # process('2018/180102')
 
 
 if __name__ == '__main__':
