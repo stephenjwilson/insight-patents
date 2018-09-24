@@ -4,6 +4,7 @@ The Patent class, which contains the fields of interest for storing data from XM
 import datetime
 import re
 
+
 class Patent(object):
     """
     The Patent class, which contains the fields of interest for storing data from XML
@@ -58,13 +59,14 @@ class Patent(object):
         """
         s = []
         # Deal with all other fields
-        pattern = re.compile('[\W_.]+')
+        pattern = re.compile('[^A-Za-z0-9_\. ]+')
         for field in fields:
             val = getattr(self, field)
             if val is not None:  # Silently ignores fields that are not present
                 if type(val) == str:
                     val = val.replace('"', '').replace(",", '')
                     val = pattern.sub('', val)
+
                     if 'date' in field:
                         val = datetime.datetime.strptime(str(val), '%Y%m%d').strftime('%Y-%m-%d')
                 elif type(val) == list:
