@@ -2,7 +2,7 @@
 The Patent class, which contains the fields of interest for storing data from XML
 """
 import datetime
-
+import re
 
 class Patent(object):
     """
@@ -58,11 +58,13 @@ class Patent(object):
         """
         s = []
         # Deal with all other fields
+        pattern = re.compile('[\W_.]+')
         for field in fields:
             val = getattr(self, field)
             if val is not None:  # Silently ignores fields that are not present
                 if type(val) == str:
-                    val = val.replace('"', '').replace(",", '').replace('\n', '')
+                    val = val.replace('"', '').replace(",", '')
+                    val = pattern.sub('', val)
                     if 'date' in field:
                         val = datetime.datetime.strptime(str(val), '%Y%m%d').strftime('%Y-%m-%d')
                 elif type(val) == list:
@@ -73,9 +75,10 @@ class Patent(object):
                         val = "|".join(val)
                     elif 'chemicals' == field:
                         val = "|".join(val)
+                val = '"%s"' % val
                 s.append(val.strip())
             else:
-                s.append('')
+                s.append('N/A')
         return sep.join(s) + '\n'
 
     def to_neo4j_relationships(self, sep=','):
