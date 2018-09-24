@@ -62,7 +62,7 @@ class Patent(object):
             val = getattr(self, field)
             if val is not None:  # Silently ignores fields that are not present
                 if type(val) == str:
-                    val = val.replace('"', '').replace(",", '')
+                    val = val.replace('"', '').replace(",", '').replace('\n', '')
                     if 'date' in field:
                         val = datetime.datetime.strptime(str(val), '%Y%m%d').strftime('%Y-%m-%d')
                 elif type(val) == list:

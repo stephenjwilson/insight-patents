@@ -14,17 +14,19 @@ sudo apt-get install -y build-essential
 sudo apt-get install -y ssh
 
 # Spark installation
+# un-tar
+rm -rf spark
+tar -zxf /tmp/spark-2.3.1-bin-custom-spark.tgz -C /home/ubuntu/
+mv spark-2.3.1-bin-custom-spark spark
 
 sudo groupadd -g 2000 spark
 sudo useradd -m -u 2000 -g 2000 -c 'Apache Spark' -s /bin/bash -d /home/ubuntu/spark spark
-# un-tar
-tar -zxf /tmp/spark-2.3.1-bin-custom-spark.tgz -C /home/ubuntu/
-mv spark-2.3.1-bin-custom-spark spark
+
 echo -e "export SPARK_HOME=/home/ubuntu/spark" | cat >> ~/.profile
 echo -e "export PATH=\$PATH:\$SPARK_HOME/bin" | cat >> ~/.profile
 echo -e 'export PYSPARK_PYTHON=python3' | cat >> ~/.profile
 echo -e 'export PATH=$PATH:$SPARK_HOME/bin:$SPARK_HOME/sbin' | cat >> ~/.profile
-
+echo -e 'export PYTHONPATH=${PYTHONPATH}:/home/ubuntu/insight-patents' | cat >> ~/.profile
 
 # Install Open JDK 8 and JRE 8
 sudo add-apt-repository -y ppa:openjdk-r/ppa
@@ -70,5 +72,6 @@ sudo sed -i 's/disable_root.*/disable_root: 0/g' /etc/cloud/cloud.cfg
 
 # Download Github
 git clone https://github.com/stephenjwilson/insight-patents.git
+chown -R ubuntu:ubuntu insight-patents/
 # Install python dependencies
 pip3 install -r ~/insight-patents/requirements.txt

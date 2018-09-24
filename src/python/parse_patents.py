@@ -28,7 +28,7 @@ def to_csv(list_of_patents, output, sep=','):
     :param sep: The separator for the csv file
     :return: postgres file, neo4j nodes file, neo4j edges file
     """
-    fields = ['patent_number', 'file_date', 'title', 'grant_date', 'owner', 'country', 'ipcs']  # TODO: add abstract?
+    fields = ['patent_number', 'file_date', 'grant_date', 'title', 'abstract', 'owner', 'country', 'ipcs']
     OUT = open(output, 'w')  # input into postgres
     OUT2 = open(output.replace('.csv', '') + '_nodes.csv', 'w')  # input into neo4j nodes
     OUT3 = open(output.replace('.csv', '') + '_edges.csv', 'w')  # input into neo4j edges
@@ -70,8 +70,9 @@ def ensure_postgres():
     CREATE TABLE IF NOT EXISTS patents(
         patent_number text PRIMARY KEY,
         file_date date,
-        title text,
         grant_date date,
+        title text,
+        abstract text,
         owner text,
         country text,
         ipc text
@@ -97,8 +98,8 @@ def to_postgres(csv_file):
 
     # Upload data
     cur = conn.cursor()
-    cur.copy_from(open(csv_file), 'patents', columns=('patent_number', 'file_date', 'title', 'grant_date', 'owner',
-                                                      'country', 'ipc'), sep=',')
+    cur.copy_from(open(csv_file), 'patents', columns=('patent_number', 'file_date', 'grant_date', 'title', 'abstract',
+                                                      'owner', 'country', 'ipc'), sep=',')
     conn.commit()
     conn.close()
 
@@ -124,9 +125,11 @@ def to_neo4j(csv_nodes, csv_edges):
     query = '''
     LOAD CSV WITH HEADERS FROM "https://s3.amazonaws.com/tmpbucketpatents/%s"
     AS csvLine
-    MERGE (p: Patent {patent_number: csvLine.patent_number, title: csvLine.title})
-    ON CREATE SET p = {patent_number: csvLine.patent_number, title: csvLine.title}
-    ON MATCH SET p += {patent_number: csvLine.patent_number, title: csvLine.title}''' % csv_nodes
+    MERGE (p: Patent {patent_number: csvLine.patent_number })
+    ON CREATE SET p = {patent_number: csvLine.patent_number, title: csvLine.title, owner: csvLine.owner, 
+    abstract: csvLine.abstract}
+    ON MATCH SET p += {patent_number: csvLine.patent_number, title: csvLine.title, owner: csvLine.owner, 
+    abstract: csvLine.abstract}''' % csv_nodes
     session.run(query)
 
     # Set up Patent Relationships
