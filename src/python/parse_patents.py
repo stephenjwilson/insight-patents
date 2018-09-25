@@ -13,10 +13,10 @@ from dotenv import load_dotenv, find_dotenv
 from neo4j.v1 import GraphDatabase
 from pyspark import SparkContext
 
-try:
-    from src.python.parsers import PatentParser
-except:
-    from parsers import PatentParser
+#try:
+from src.python.parsers import PatentParser
+#except:
+#from parsers import PatentParser
 BUCKET_NAME = 'patent-xml-zipped'
 
 
