@@ -6,11 +6,9 @@ from itertools import chain
 
 from lxml import etree
 
-# try:
 from src.python.patent import Patent
 
 
-#except:
 #from patent import Patent
 
 
