@@ -2,13 +2,14 @@
 
 Much of the parsing code was based loosely on https://github.com/iamlemec/patents/
 """
-from io import BytesIO
 from itertools import chain
 
 from lxml import etree
 
-#try:
+# try:
 from src.python.patent import Patent
+
+
 #except:
 #from patent import Patent
 
@@ -65,6 +66,13 @@ class PatentParser(object):
         :return:
         """
         return sep.join(element.itertext()).strip()
+
+    def handle_all(self, pp, parsing_func):
+        for (_, pat) in pp.read_events():
+            if not parsing_func(pat):
+                return False
+            self.clear(pat)
+        return True
 
     @staticmethod
     def clear(elem):
@@ -182,12 +190,14 @@ class PatentParser(object):
         """
         Parses v2 of the patent data.
         """
-        lines = [line for line in open(self.file_name).readlines() if self.acceptable(line)]  # TODO: maybe optimize
-        lines = ['<root>\n'] + lines + ['</root>\n']
-        context = etree.iterparse(BytesIO(''.join(lines).encode('utf-8')), tag='us-patent-grant', events=['end'],
-                                  recover=True)
 
-        for _, elem in context:
+        # Optimize
+
+        # lines = [line for line in open(self.file_name).readlines() if self.acceptable(line)]  # TODO: maybe optimize
+        # lines = ['<root>\n'] + lines + ['</root>\n']
+        # context = etree.iterparse(BytesIO(''.join(lines).encode('utf-8')), tag='us-patent-grant', events=['end'],
+        #                           recover=True)
+        def parse(elem):
             patent = Patent(self.file_name)
             # top-level section
             bib = elem.find('SDOBI')
@@ -234,16 +244,32 @@ class PatentParser(object):
                 patent.abstract = '\n'.join([self.raw_text(e) for e in abspars])
             self.patents.append(patent)
 
+        pp = etree.XMLPullParser(tag='us-patent-grant', events=['end'], recover=True)
+        with open(self.file_name, errors='ignore') as f:
+            pp.feed('<root>\n')
+            for line in f:
+                if line.startswith('<?xml'):
+                    if not self.handle_all(pp, parse):
+                        break
+                elif line.startswith('<!DOCTYPE'):
+                    pass
+                else:
+                    pp.feed(line)
+            else:
+                pp.feed('</root>\n')
+                self.handle_all(pp, parse)
+
     def parse_v3(self):
         """
         Parses v3 of the patent data TODO: write tests for parsers
         """
-        lines = [line for line in open(self.file_name).readlines() if self.acceptable(line)]  # TODO: maybe optimize
-        lines = ['<root>\n'] + lines + ['</root>\n']
-        context = etree.iterparse(BytesIO(''.join(lines).encode('utf-8')), tag='us-patent-grant', events=['end'],
-                                  recover=True)
 
-        for _, elem in context:
+        # lines = [line for line in open(self.file_name).readlines() if self.acceptable(line)]  # TODO: maybe optimize
+        # lines = ['<root>\n'] + lines + ['</root>\n']
+        # context = etree.iterparse(BytesIO(''.join(lines).encode('utf-8')), tag='us-patent-grant', events=['end'],
+        #                           recover=True)
+
+        def parse(elem):
             patent = Patent(self.file_name)
 
             # top-level section
@@ -310,3 +336,18 @@ class PatentParser(object):
                 patent.abstract = self.raw_text(abspar, sep=' ')
 
             self.patents.append(patent)
+
+        pp = etree.XMLPullParser(tag='us-patent-grant', events=['end'], recover=True)
+        with open(self.file_name, errors='ignore') as f:
+            pp.feed('<root>\n')
+            for line in f:
+                if line.startswith('<?xml'):
+                    if not self.handle_all(pp, parse):
+                        break
+                elif line.startswith('<!DOCTYPE'):
+                    pass
+                else:
+                    pp.feed(line)
+            else:
+                pp.feed('</root>\n')
+                self.handle_all(pp, parse)

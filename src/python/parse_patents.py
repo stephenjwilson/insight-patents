@@ -13,8 +13,9 @@ from dotenv import load_dotenv, find_dotenv
 from neo4j.v1 import GraphDatabase
 from pyspark import SparkContext
 
-#try:
+# try:
 from src.python.parsers import PatentParser
+
 #except:
 #from parsers import PatentParser
 BUCKET_NAME = 'patent-xml-zipped'
@@ -269,11 +270,12 @@ def main():
         #if len(keys_to_process) > 20:
         #    break
     # Create Spark job
+    # keys_to_process = [key for key in keys_to_process if int(key.split('/')[0])>2003]
     sc = SparkContext().getOrCreate()
     keys_to_process = sc.parallelize(keys_to_process, 24)
-    #keys_to_process.repartition(5)
+
     details = keys_to_process.map(process).collect()
-#    details.saveAsTextFile("tmp4")
+    # details.saveAsTextFile("tmp4")
     # For Dev
     # for key in keys_to_process:
     #     process(key)
