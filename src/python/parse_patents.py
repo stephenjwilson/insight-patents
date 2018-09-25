@@ -266,13 +266,14 @@ def main():
         if ".json" in my_object.key:
             continue
         keys_to_process.append(my_object.key)
-        if len(keys_to_process) > 20:
-            break
+        #if len(keys_to_process) > 20:
+        #    break
     # Create Spark job
     sc = SparkContext().getOrCreate()
-    keys_to_process = sc.parallelize(keys_to_process)
-    keys_to_process.map(process).collect()
-
+    keys_to_process = sc.parallelize(keys_to_process, 24)
+    #keys_to_process.repartition(5)
+    details = keys_to_process.map(process).collect()
+#    details.saveAsTextFile("tmp4")
     # For Dev
     # for key in keys_to_process:
     #     process(key)
