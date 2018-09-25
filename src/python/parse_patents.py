@@ -124,6 +124,7 @@ def to_neo4j(csv_nodes, csv_edges):
     session.sync()
     # Add Patents TODO: add other fields
     query = '''
+    USING PERIODIC COMMIT 500
     LOAD CSV WITH HEADERS FROM "https://s3.amazonaws.com/tmpbucketpatents/%s"
     AS csvLine
     MERGE (p: Patent {patent_number: csvLine.patent_number })
@@ -137,6 +138,7 @@ def to_neo4j(csv_nodes, csv_edges):
     session.sync()
 
     query = '''
+    USING PERIODIC COMMIT 500
     LOAD CSV WITH HEADERS FROM "https://s3.amazonaws.com/tmpbucketpatents/%s"
     AS csvLine
     MERGE (f: Patent {patent_number: csvLine.patent_number})
@@ -231,14 +233,14 @@ def process(key):
         pass
     logging.info("Pushed {} to PostgreSQL".format(key))
 
-    # Push intermediate files to s3
-    fl1 = key + '_nodes.csv'
-    fl2 = key + '_edges.csv'
-    push_to_s3(fl1, output_file2, bucket="tmpbucketpatents")
-    push_to_s3(fl2, output_file3, bucket="tmpbucketpatents")
-
-    # Use intermediate files on s3 to load into neo4j
-    to_neo4j(fl1, fl2)
+    # # Push intermediate files to s3
+    # fl1 = key + '_nodes.csv'
+    # fl2 = key + '_edges.csv'
+    # push_to_s3(fl1, output_file2, bucket="tmpbucketpatents")
+    # push_to_s3(fl2, output_file3, bucket="tmpbucketpatents")
+    #
+    # # Use intermediate files on s3 to load into neo4j
+    # to_neo4j(fl1, fl2)
     logging.info("Pushed {} to Neo4j".format(key))
 
     # Clean Up files
@@ -270,7 +272,7 @@ def main():
         #if len(keys_to_process) > 20:
         #    break
     # Create Spark job
-    # keys_to_process = [key for key in keys_to_process if int(key.split('/')[0])>2003]
+    keys_to_process = [key for key in keys_to_process if int(key.split('/')[0]) > 2003]
     sc = SparkContext().getOrCreate()
     keys_to_process = sc.parallelize(keys_to_process, 24)
 
