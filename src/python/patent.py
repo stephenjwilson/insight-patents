@@ -68,6 +68,10 @@ class Patent(object):
                     val = pattern.sub('', val)
 
                     if 'date' in field:
+                        # if len(val)>6:
+                        #    val = val[2:]
+                        if val[-2:] == '00':
+                            val = val[:-2] + '01'
                         val = datetime.datetime.strptime(str(val), '%Y%m%d').strftime('%Y-%m-%d')
                 elif type(val) == list:
                     if 'ipc' in field:
