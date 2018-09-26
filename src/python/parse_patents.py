@@ -11,7 +11,7 @@ import botocore
 import psycopg2
 from dotenv import load_dotenv, find_dotenv
 from neo4j.v1 import GraphDatabase
-
+from pyspark import SparkContext
 from src.python.parsers import PatentParser
 
 #from parsers import PatentParser
@@ -224,32 +224,32 @@ def process(key):
     logging.info("Parsed {}".format(key))
     output_file, output_file2, output_file3 = to_csv(patent_parser.patents, output_file)
 
-    # # Dump patent data to Postgres
-    # try:
-    #     to_postgres(output_file)
-    # except psycopg2.IntegrityError:
-    #     pass
+    # Dump patent data to Postgres
+    try:
+        to_postgres(output_file)
+    except psycopg2.IntegrityError:
+        pass
     # logging.info("Pushed {} to PostgreSQL".format(key))
 
     # Push intermediate files to s3
     fl1 = key + '_nodes.csv'
     fl2 = key + '_edges.csv'
-    os.system('hdfs dfs -cp -f {0} hdfs/user/{0}'.format(fl1))
-    os.system('hdfs dfs -cp -f {0} hdfs/user/{0}'.format(fl2))
-    logging.info("Pushed {} to HDFS".format(key))
+    os.system('hdfs dfs -copyFromLocal {0} /user/{0}'.format(fl1))
+    os.system('hdfs dfs -copyFromLocal {0} /user/{0}'.format(fl2))
+    #logging.info("Pushed {} to HDFS".format(key))
     # push_to_s3(fl1, output_file2, bucket="tmpbucketpatents")
     # push_to_s3(fl2, output_file3, bucket="tmpbucketpatents")
 
     # Use intermediate files on s3 to load into neo4j
-    # to_neo4j(fl1, fl2)
+    #to_neo4j(fl1, fl2)
     # logging.info("Pushed {} to Neo4j".format(key))
 
     # Clean Up files
     os.remove(file_name)
     os.remove(decompress_name)
     os.remove(output_file)
-    os.remove(output_file2)
-    os.remove(output_file3)
+    #os.remove(output_file2)
+    #os.remove(output_file3)
 
 
 def main():
@@ -270,21 +270,24 @@ def main():
         if ".json" in my_object.key:
             continue
         keys_to_process.append(my_object.key)
-        #if len(keys_to_process) > 20:
-        #    break
+        if len(keys_to_process) > 20:
+            break
     # Create Spark job
     # keys_to_process = [key for key in keys_to_process if int(key.split('/')[0]) > 2003]
-    # sc = SparkContext().getOrCreate()
-    # keys_to_process = sc.parallelize(keys_to_process, 24)
-    # details = keys_to_process.map(process).collect()
+    sc = SparkContext().getOrCreate()
+    
+    for i in range(0,len(keys_to_process)):
+        if i%24:
+            rdd = sc.parallelize(keys_to_process[i-24:i], 24)
+            rdd.foreach(process)#.collect()
     # details.saveAsTextFile("tmp4")
     # For Dev
     # for key in keys_to_process:
     #     process(key)
     #     break
     # process('1976/19760120')
-    process('2003/030107')
-    process('2018/180102')
+    #process('2003/030107')
+    #process('2018/180102')
 
 
 if __name__ == '__main__':
