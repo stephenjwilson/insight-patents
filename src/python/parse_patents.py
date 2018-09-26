@@ -214,6 +214,11 @@ def main():
     LOGGER = log4jLogger.LogManager.getLogger(__name__)
 
     s3.create_bucket(Bucket='edges')
+    my_bucket = s3.Bucket('edges')
+    edge_files = []
+    for my_object in my_bucket.objects.all():
+        edge_files.append(my_object.key)
+
     c = 0
     for chunk in chunks(keys_to_process, 24):
         # Todo: read with s3a instead and union together
@@ -221,7 +226,7 @@ def main():
         # for i in range(1, len(rdds)):
         #     rdds[0].join(rdds[i])
         # rdd = rdds[0]
-        if os.path.exists("edges_{}".format(c)):
+        if "edges_{}".format(c) in edge_files:
             LOGGER.info("edges_{} already exists".format(c))
             c+=1
             continue
