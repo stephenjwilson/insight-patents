@@ -42,6 +42,13 @@ peg scp to-rem ${CLUSTER_NAME} 3 .env /home/ubuntu
 peg scp to-rem ${CLUSTER_NAME} 4 .env /home/ubuntu
 peg scp to-rem ${CLUSTER_NAME} 5 .env /home/ubuntu
 
+# Transfer aws
+peg scp to-rem ${CLUSTER_NAME} 1 ~/.aws /home/ubuntu
+peg scp to-rem ${CLUSTER_NAME} 2 ~/.aws /home/ubuntu
+peg scp to-rem ${CLUSTER_NAME} 3 ~/.aws /home/ubuntu
+peg scp to-rem ${CLUSTER_NAME} 4 ~/.aws /home/ubuntu
+peg scp to-rem ${CLUSTER_NAME} 5 ~/.aws /home/ubuntu
+
 # git clone project
 peg sshcmd-cluster ${CLUSTER_NAME} "git clone https://github.com/stephenjwilson/insight-patents.git"
 

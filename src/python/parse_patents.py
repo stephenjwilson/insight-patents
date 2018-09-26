@@ -2,11 +2,9 @@
 The main run script of the pipeline. It includes a main function that is used in spark submit.
 """
 
-import glob
 import io
 import logging
 import os
-import shutil
 import zipfile
 
 import boto3
@@ -215,6 +213,7 @@ def main():
     log4jLogger = sc._jvm.org.apache.log4j
     LOGGER = log4jLogger.LogManager.getLogger(__name__)
 
+    s3.create_bucket(Bucket='edges')
     c = 0
     for chunk in chunks(keys_to_process, 24):
         # Todo: read with s3a instead and union together
@@ -228,17 +227,17 @@ def main():
             continue
         rdd = sc.parallelize(chunk, 24)
         edges = rdd.map(process).cache()
-        edges.coalesce(1).saveAsTextFile("edges_{}".format(c))
+        edges.coalesce(1).saveAsTextFile("s3a://{}/{}".format(edges, "edges_{}".format(c)))
         c += 1
         LOGGER.info("edges_{} created".format(c))
 
-    # Combine edge data
-    files = glob.glob('edge*/part*')
-    os.system('cat {} > edge_data.csv'.format(' '.join(files)))
-    folders = glob.glob('edge*/')
-    for folder in folders:
-        shutil.rmtree(folder)
-    LOGGER.info(os.path.abspath('edge_data.csv'))
+    # # Combine edge data
+    # files = glob.glob('edge*/part*')
+    # os.system('cat {} > edge_data.csv'.format(' '.join(files)))
+    # folders = glob.glob('edge*/')
+    # for folder in folders:
+    #     shutil.rmtree(folder)
+    # LOGGER.info(os.path.abspath('edge_data.csv'))
 
 
 if __name__ == '__main__':
