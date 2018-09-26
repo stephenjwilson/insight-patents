@@ -68,11 +68,17 @@ class Patent(object):
                     val = pattern.sub('', val)
 
                     if 'date' in field:
-                        # if len(val)>6:
-                        #    val = val[2:]
+                        if len(val)>8:
+                            val = '1900-01-01'
                         if val[-2:] == '00':
                             val = val[:-2] + '01'
-                        val = datetime.datetime.strptime(str(val), '%Y%m%d').strftime('%Y-%m-%d')
+                        if int(val[:2]) != 20 and int(val[:2]) != 19:
+                            val = '1900-01-01'
+                        try:
+                            val = datetime.datetime.strptime(str(val), '%Y%m%d').strftime('%Y-%m-%d')
+                        except:
+                            val = '1900-01-01'
+                        
                 elif type(val) == list:
                     if 'ipc' in field:
                         # Deal with ipcs

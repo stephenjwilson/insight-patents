@@ -78,12 +78,13 @@ def main():
     for my_object in my_bucket.objects.all():
         if ".json" in my_object.key:
             continue
-        if my_object.key[:4] != '2018':
+        if int(my_object.key.split('/')[0]) <1986:
             continue
         fl_name = download_from_s3(my_object.key)
-        fl_name = decompress(fl_name)
-        push_to_s3(fl_name, fl_name, 'patent-xml')
-
+        fl_name_new = decompress(fl_name)
+        push_to_s3(fl_name_new, fl_name_new, 'patent-xml')
+        os.remove(fl_name)
+        os.remove(fl_name_new)
 
 if __name__ == '__main__':
     main()

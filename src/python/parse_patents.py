@@ -211,20 +211,26 @@ def main():
 
     # Create Spark job
     # keys_to_process = [key for key in keys_to_process if int(key.split('/')[0]) > 2003]
-
     sc = SparkContext().getOrCreate()
+    log4jLogger = sc._jvm.org.apache.log4j
+    LOGGER = log4jLogger.LogManager.getLogger(__name__)
 
     c = 0
-    for chunk in chunks(keys_to_process, 5):
+    for chunk in chunks(keys_to_process, 24):
         # Todo: read with s3a instead and union together
         # rdds = [sc.HadoopFile("s3a://{}/{}".format(BUCKET_NAME, key)) for key in chunk]
         # for i in range(1, len(rdds)):
         #     rdds[0].join(rdds[i])
         # rdd = rdds[0]
+        if os.path.exists("edges_{}".format(c)):
+            LOGGER.info("edges_{} already exists".format(c))
+            c+=1
+            continue
         rdd = sc.parallelize(chunk, 24)
         edges = rdd.map(process).cache()
         edges.coalesce(1).saveAsTextFile("edges_{}".format(c))
         c += 1
+        LOGGER.info("edges_{} created".format(c))
 
     # Combine edge data
     files = glob.glob('edge*/part*')
@@ -232,7 +238,7 @@ def main():
     folders = glob.glob('edge*/')
     for folder in folders:
         shutil.rmtree(folder)
-    logging.log(os.path.abspath('edge_data.csv'))
+    LOGGER.info(os.path.abspath('edge_data.csv'))
 
 
 if __name__ == '__main__':
