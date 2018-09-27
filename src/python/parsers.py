@@ -5,6 +5,7 @@ Much of the parsing code was based loosely on https://github.com/iamlemec/patent
 from itertools import chain
 
 from lxml import etree
+from pyspark import SparkContext
 
 from src.python.patent import Patent
 
@@ -29,6 +30,9 @@ class PatentParser(object):
         :param file_name:
         :param detect_format:
         """
+        sc = SparkContext()
+        log4jLogger = sc._jvm.org.apache.log4j
+        log = log4jLogger.LogManager.getLogger(__name__)
         # Passed Parameters
         self.file_name = file_name
 
@@ -41,7 +45,10 @@ class PatentParser(object):
             self.determine_patent_type()
 
         # Parse the data into a list of patents
-        self.parser()
+        try:
+            self.parser()
+        except:
+            log.warn('Failed to parse {}'.format(file_name))
 
     @staticmethod
     def get_child_text(element, tag, default=''):
@@ -114,7 +121,8 @@ class PatentParser(object):
             self.generation = 2
             self.parser = self.parse_v2
         else:
-            raise (Exception('Unknown format'))
+            self.parser = self.parse_v2  # try parse v2
+            # raise (Exception('Unknown format'))
 
     def parse_v1(self):
         """
