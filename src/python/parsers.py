@@ -2,6 +2,7 @@
 
 Much of the parsing code was based loosely on https://github.com/iamlemec/patents/
 """
+import re
 from itertools import chain
 
 from lxml import etree
@@ -104,6 +105,66 @@ class PatentParser(object):
         else:
             return True
 
+    @staticmethod
+    def clean_citation(pat_doc_num):
+        """
+
+        :param pat_doc_num:
+        :return:
+        """
+        single_prefixes_to_ignore = ['D', 'H', 'T', 'X', 'R', 'W', 'S', 'L', 'F', 'P']
+        double_prefixes_to_ignore = ['PP', 'RE', 'AI']
+        pattern = re.compile('[^A-Za-z0-9]+')
+        year_extract = re.compile('20[0-9][0-9]([0-9]+)')
+        pat_doc_num = pat_doc_num.upper().replace('D. ', '')  # ensure uppercase
+        pat_doc_num = pattern.sub('', pat_doc_num)  # Clean out non-alphanumeric
+        prefixes = ["A1", "A2", "A9", "Bn", "B1", "B2", "Cn", "E1", "Fn", "H1", "I1",
+                    "I2", "I3", "I4", "I5", "P1", "P2", "P3", "P4", "P9", "S1",
+                    "H", "E", "S", "A", "B", "T"]
+        kind_code_regex = re.compile('(%s)([0-9]{7})' % '|'.join(prefixes))
+        # Edge case: they just put the work CITATION in:
+        if pat_doc_num == 'CITATION':
+            return ''
+        # The next section handles all the cases of weird citation formatting
+        # Do nothing. This is a utility
+        if len(pat_doc_num) == 8 and pat_doc_num.isdigit():
+            return pat_doc_num
+        # This is a utility that is missing zeros
+        elif len(pat_doc_num) < 8 and pat_doc_num.isdigit():
+            return pat_doc_num.zfill(8)
+        elif len(pat_doc_num) > 8 and pat_doc_num.isdigit():
+            # Find the instances where a year is appended to a name
+            ls = year_extract.findall(pat_doc_num)
+            if len(ls) != 0:
+                pat_doc_num = ls[0]
+                return pat_doc_num.zfill(8)
+            else:
+                return None  # Failure. Send to human review
+        else:
+            # find instances that have kind codes prefixed with 7 numbers after
+            ls = kind_code_regex.findall(pat_doc_num)
+            if len(ls) != 0:
+                if len(ls[0]) == 2:
+                    pat_doc_num = ls[0][1]
+                    kind = ls[0][0]
+                    if kind in ['B', 'A', 'B1', 'B2']:
+                        return pat_doc_num.zfill(8)
+                    else:
+                        return ''
+            # These are design patents. Ignore
+            if 'DES' in pat_doc_num:
+                pat_doc_num = pat_doc_num.replace('DES', 'D')
+            # Ignore certain prefixes
+            if pat_doc_num[0] in single_prefixes_to_ignore or pat_doc_num[:2] in double_prefixes_to_ignore:
+                return ''
+            # If it is a utility, strip prefix, add zeros
+            if pat_doc_num[0] == 'B' or pat_doc_num[0] == 'A':
+                return pat_doc_num[:1].zfill(8)
+            if pat_doc_num[-1] == 'B' or pat_doc_num[-1] == 'A':
+                return pat_doc_num[:-1].zfill(8)
+
+            return None  # Failure. Send to human review
+
     def determine_patent_type(self):
         """
         Determines patent version and parser
@@ -134,7 +195,7 @@ class PatentParser(object):
         sec = None
         tag = None
         ipcver = None
-
+        ignore = False
         for nline in chain(open(self.file_name, encoding='latin1', errors='ignore'), ['PATN']):
             # peek at next line
             (ntag, nbuf) = (nline[:4].rstrip(), nline[5:-1].rstrip())
@@ -150,7 +211,10 @@ class PatentParser(object):
             if tag == 'PATN':
                 if pat is not None:
                     pat.ipcs = [(ipc, ipcver) for ipc in pat.ipcs]
-                    self.patents.append(pat)
+                    if not ignore:
+                        self.patents.append(pat)
+                    else:
+                        ignore = False
                 pat = Patent(self.file_name)
                 citations = []
 
@@ -162,7 +226,13 @@ class PatentParser(object):
                     pat.abstract += '\n' + buf
             elif tag == 'WKU':
                 if sec == 'PATN':
-                    pat.patent_number = buf
+                    cleaned = self.clean_citation(buf)
+                    if cleaned.isdigit():
+                        pat.patent_number = buf
+                    elif cleaned is None:
+                        pat.flagged_for_review = True  # Malformed citation
+                    else:
+                        ignore = True  # Types of patents not to catch
             elif tag == 'ISD':
                 if sec == 'PATN':
                     pat.grant_date = buf
@@ -186,7 +256,11 @@ class PatentParser(object):
                     pat.country = buf[:2]
             elif tag == 'PNO':
                 if sec == 'UREF':
-                    pat.citations.append(buf)
+                    cleaned = self.clean_citation(buf)
+                    if cleaned.isdigit():
+                        pat.citations.append(cleaned)
+                    else:
+                        pass  # Types of patents not to catch
 
             # stage next tag and buf
             tag = ntag
@@ -196,20 +270,23 @@ class PatentParser(object):
         """
         Parses v2 of the patent data.
         """
-
-        # Optimize
-
-        # lines = [line for line in open(self.file_name).readlines() if self.acceptable(line)]  # TODO: maybe optimize
-        # lines = ['<root>\n'] + lines + ['</root>\n']
-        # context = etree.iterparse(BytesIO(''.join(lines).encode('utf-8')), tag='us-patent-grant', events=['end'],
-        #                           recover=True)
         def parse(elem):
             patent = Patent(self.file_name)
             # top-level section
             bib = elem.find('SDOBI')
 
             # published patent
-            patent.patent_number = self.get_child_text(bib.find('B100'), 'B110/DNUM/PDAT')
+            patnum = self.get_child_text(bib.find('B100'), 'B110/DNUM/PDAT')
+            cleaned = self.clean_citation(patnum)
+
+            if cleaned.isdigit():
+                patent.patent_number = cleaned
+            elif cleaned is None:
+                patent.flagged_for_review = True  # Malformed citation
+                patent.patent_number = patnum
+            else:
+                return  # Ignore certain types of patents
+
             patent.grant_date = self.get_child_text(bib.find('B100'), 'B140/DATE/PDAT')
             patent.file_date = self.get_child_text(bib.find('B200'), 'B220/DATE/PDAT')
 
@@ -230,7 +307,15 @@ class PatentParser(object):
             refs = patref.find('B560')
             if refs is not None:
                 for cite in refs.findall('B561'):
-                    cites.append(self.get_child_text(cite, 'PCIT/DOC/DNUM/PDAT'))
+                    citation = self.get_child_text(cite, 'PCIT/DOC/DNUM/PDAT')
+                    cleaned = self.clean_citation(citation)
+                    if cleaned.isdigit():
+                        cites.append(cleaned)
+                    elif cleaned is None:
+                        patent.flagged_for_review = True  # Malformed citation
+                    else:
+                        pass  # Types of patents not to catch
+
             patent.citations = cites
 
             # title
@@ -267,14 +352,8 @@ class PatentParser(object):
 
     def parse_v3(self):
         """
-        Parses v3 of the patent data TODO: write tests for parsers
+        Parses v3 of the patent data
         """
-
-        # lines = [line for line in open(self.file_name).readlines() if self.acceptable(line)]  # TODO: maybe optimize
-        # lines = ['<root>\n'] + lines + ['</root>\n']
-        # context = etree.iterparse(BytesIO(''.join(lines).encode('utf-8')), tag='us-patent-grant', events=['end'],
-        #                           recover=True)
-
         def parse(elem):
             patent = Patent(self.file_name)
 
@@ -285,7 +364,17 @@ class PatentParser(object):
 
             # published patent
             pubinfo = pubref.find('document-id')
-            patent.patent_number = self.get_child_text(pubinfo, 'doc-number')
+            patnum = self.get_child_text(pubinfo, 'doc-number')
+            cleaned = self.clean_citation(patnum)
+
+            if cleaned.isdigit():
+                patent.patent_number = cleaned
+            elif cleaned is None:
+                patent.flagged_for_review = True  # Malformed citation
+                patent.patent_number = patnum
+            else:
+                return  # Ignore certain types of patents
+
             patent.grant_date = self.get_child_text(pubinfo, 'date')
             patent.file_date = self.get_child_text(appref, 'document-id/date')
             patent.title = self.get_child_text(bib, 'invention-title')
@@ -325,8 +414,13 @@ class PatentParser(object):
                         docid = pcite.find('document-id')
                         pnum = self.get_child_text(docid, 'doc-number')
                         kind = self.get_child_text(docid, 'kind')
-                        if kind == 'A' or kind.startswith('B'):
-                            cites.append(pnum)
+
+                        cleaned = self.clean_citation(pnum)
+                        if cleaned.isdigit():
+                            cites.append(cleaned)
+                        else:
+                            pass  # Types of patents not to catch / citations to ignore
+
             patent.citations = cites
 
             # applicant name and address

@@ -20,12 +20,13 @@ from src.python.parsers import PatentParser
 BUCKET_NAME = 'patent-xml-zipped'
 
 
-def to_csv(list_of_patents, sep=','):
+def to_csv(list_of_patents, sep=',', review_only=False):
     """
     Takes a list_of_patent_dictionaries and outputs a csv that can be uploaded into postgres
     :param list_of_patents: A list of Patent objects
     :param output: The file name used to output the files
     :param sep: The separator for the csv file
+    :param review_only: Dictates if the function should only return review articles
     :return: nodes string, edges string
     """
     fields = ['patent_number', 'file_date', 'grant_date', 'title', 'abstract', 'owner', 'country', 'ipcs']
@@ -33,12 +34,18 @@ def to_csv(list_of_patents, sep=','):
     edges = "patent_number{}citation\n".format(sep)
 
     for patent in list_of_patents:
-        s = patent.to_csv(fields, sep=sep)
-        nodes += s
-
-        # Deal with relationships
-        edges += patent.to_neo4j_relationships()
-
+        # Is the patent malformed?
+        if review_only and patent.flagged_for_review:
+            s = patent.to_csv(fields, sep=sep)
+            nodes += s
+            # don't make relationships
+        elif not review_only and not patent.flagged_for_review:
+            s = patent.to_csv(fields, sep=sep)
+            nodes += s
+            # Deal with relationships
+            edges += patent.to_neo4j_relationships()
+        else:
+            pass  # ignore the patent
     return nodes, edges
 
 
@@ -71,14 +78,27 @@ def ensure_postgres():
         ipc text
     )
     """)
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS patents_to_review(
+        patent_number text PRIMARY KEY,
+        file_date date,
+        grant_date date,
+        title text,
+        abstract text,
+        owner text,
+        country text,
+        ipc text
+    )
+    """)
     conn.commit()
     conn.close()
 
 
-def to_postgres(data):
+def to_postgres(data, table='patents'):
     """
     Do a bulk upload of a csv file to a PostgreSQL database.
     :param csv_file: The name of the csv file to upload
+    :param table: The name of the table to commit to
     """
 
     # Connect to postgres
@@ -92,14 +112,11 @@ def to_postgres(data):
     # Upload data
     cur = conn.cursor()
     copy_sql = """
-               COPY patents FROM stdin WITH CSV HEADER
+               COPY {} FROM stdin WITH CSV HEADER
                DELIMITER as ','
-               """
+               """.format(table)
 
     cur.copy_expert(sql=copy_sql, file=io.StringIO(data))
-
-    # cur.copy_from(io.StringIO(data), 'patents', columns=('patent_number', 'file_date', 'grant_date', 'title', 'abstract',
-    #                                                      'owner', 'country', 'ipc'), sep=',')
     conn.commit()
     conn.close()
 
@@ -170,6 +187,15 @@ def process(key):
     # send nodes to postgres
     try:
         to_postgres(nodes)
+    except psycopg2.IntegrityError:
+        pass
+
+    # send out malformed data
+    nodes, edges = to_csv(patent_parser.patents, review_only=True)
+
+    # send nodes to postgres
+    try:
+        to_postgres(nodes, table='patents_to_review')
     except psycopg2.IntegrityError:
         pass
 

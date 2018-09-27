@@ -39,6 +39,8 @@ class Patent(object):
         self.ipcs = ipcs
         self.citations = citations
         self.chemicals = chemicals
+        self.flagged_for_review = False
+
         if self.ipcs is None:
             self.ipcs = []
         if self.citations is None:
