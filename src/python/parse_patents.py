@@ -152,30 +152,35 @@ def process(key):
     Applys an ETL pipeline for patents on a particular key from a S3 bucket
     :param key: This is the key for the S3 Bucket
     """
-    logging.basicConfig(format='%(levelname)s:%(message)s', level=logging.INFO)
-    logging.info("Starting {}".format(key))
-    # Load environment variables
-    load_dotenv(find_dotenv())
-    # Download, decompress, and determine format of data TODO: do in memory
-    file_name = download_from_s3(key)
-
-    decompress_name = decompress(file_name)
-
-    # Parse Data and output to csv
-    patent_parser = PatentParser(decompress_name)
-
-    logging.info("Parsed {}".format(key))
-    nodes, edges = to_csv(patent_parser.patents)
-
-    # send nodes to postgres
+    sc = SparkContext.getOrCreate()
+    log4jLogger = sc._jvm.org.apache.log4j
+    LOGGER = log4jLogger.LogManager.getLogger(__name__)
+    LOGGER.info("Starting {}".format(key))
     try:
-        to_postgres(nodes)
-    except psycopg2.IntegrityError:
-        pass
+        # Load environment variables
+        load_dotenv(find_dotenv())
+        # Download, decompress, and determine format of data TODO: do in memory
+        file_name = download_from_s3(key)
 
-    # Remove files
-    os.remove(file_name)
-    os.remove(decompress_name)
+        decompress_name = decompress(file_name)
+
+        # Parse Data and output to csv
+        patent_parser = PatentParser(decompress_name)
+
+        logging.info("Parsed {}".format(key))
+        nodes, edges = to_csv(patent_parser.patents)
+
+        # send nodes to postgres
+        try:
+            to_postgres(nodes)
+        except psycopg2.IntegrityError:
+            pass
+
+        # Remove files
+        os.remove(file_name)
+        os.remove(decompress_name)
+    except Exception as e:
+        LOGGER.warn('Failed on {}, with excetption: {}'.format(key,e)) 
 
     return edges
 
@@ -213,11 +218,12 @@ def main():
     log4jLogger = sc._jvm.org.apache.log4j
     LOGGER = log4jLogger.LogManager.getLogger(__name__)
 
-    s3.create_bucket(Bucket='edges')
-    my_bucket = s3.Bucket('edges')
+    edge_bucket = 'edges-to-neo4j'
+    s3.create_bucket(Bucket=edge_bucket)
+    my_bucket = s3.Bucket(edge_bucket)
     edge_files = []
     for my_object in my_bucket.objects.all():
-        edge_files.append(my_object.key)
+        edge_files.append(my_object.key.split('/')[0])
 
     c = 0
     for chunk in chunks(keys_to_process, 24):
@@ -232,7 +238,7 @@ def main():
             continue
         rdd = sc.parallelize(chunk, 24)
         edges = rdd.map(process).cache()
-        edges.coalesce(1).saveAsTextFile("s3a://{}/{}".format(edges, "edges_{}".format(c)))
+        edges.coalesce(1).saveAsTextFile("s3a://{}/{}".format(edge_bucket, "edges_{}".format(c)))
         c += 1
         LOGGER.info("edges_{} created".format(c))
 
