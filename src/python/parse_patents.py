@@ -32,7 +32,7 @@ def to_csv(list_of_patents, sep=',', review_only=False):
 
     fields = ['patent_number', 'file_date', 'grant_date', 'title', 'abstract', 'owner', 'country', 'ipcs']
     nodes = sep.join(fields) + '\n'
-    edges = "patent_number{}citation\n".format(sep)
+    edges = ""  # ""patent_number{}citation\n".format(sep)
     for patent in list_of_patents:
         # Is the patent malformed?
         if review_only and patent.flagged_for_review:
@@ -46,9 +46,6 @@ def to_csv(list_of_patents, sep=',', review_only=False):
             edges += patent.to_neo4j_relationships()
         else:
             pass  # ignore the patent
-    # reset edges if none exist
-    if edges == "patent_number{}citation\n".format(sep):
-        edges = ''
 
     return nodes, edges
 
@@ -176,7 +173,7 @@ def process(key):
     sc = SparkContext.getOrCreate()
     log4jLogger = sc._jvm.org.apache.log4j
     LOGGER = log4jLogger.LogManager.getLogger(__name__)
-    LOGGER.setLevel(logging.WARN)
+    LOGGER.setLevel(2)
 
     LOGGER.info("Starting {}".format(key))
     try:
@@ -270,7 +267,8 @@ def main():
             continue
         rdd = sc.parallelize(chunk, 24)
         edges = rdd.map(process).cache()
-        edges.coalesce(1).saveAsTextFile("s3a://{}/{}".format(edge_bucket, "edges_{}".format(c)))
+        edges.filter(lambda x: x != "").coalesce(1).saveAsTextFile(
+            "s3a://{}/{}".format(edge_bucket, "edges_{}".format(c)))
         c += 1
         LOGGER.info("edges_{} created".format(c))
 
