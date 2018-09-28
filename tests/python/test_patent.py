@@ -1,5 +1,6 @@
 import os
 import unittest
+import zipfile
 
 import boto3
 
@@ -11,15 +12,24 @@ class PatentTests(unittest.TestCase):
     def setUp(self):
         self.patent = Patent('test')
 
-    def test_something(self):
-        self.assertEqual(True, True)
+    @staticmethod
+    def decompress(file_name):
+        """
+        Decompresses the file.  TODO: consider extracting to memory instead of disk
+        :return: Returns the name of the decompressed file
+        """
+        zip_ref = zipfile.ZipFile(file_name, 'r')
+        out_name = zip_ref.filelist[0].filename
+        zip_ref.extractall('/'.join(file_name.split('/')[:-1]))
+        zip_ref.close()
+        return out_name
 
     def test_dates(self):
         """
         Tests version 1 patent format and parsing
         :return:
         """
-        fields = ['file_date', 'grant_date']
+        fields = ['file_date']
         # Test years
         for year in [1900, 3000, 1800, 2017]:
             self.patent.file_date = '{}0101'.format(year)
@@ -34,38 +44,38 @@ class PatentTests(unittest.TestCase):
             self.patent.file_date = '200001{}'.format(day)
             self.patent.to_csv(fields)
 
-    def test_1(self):
+    def parsing(self, fl):
+        if not os.path.exists(fl.replace('/', '_')):
+            s3 = boto3.resource('s3')
+            my_bucket = s3.Bucket('patent-xml-zipped')
+            my_bucket.download_file(fl, fl.replace('/', '_'))
+
+        out_file = self.decompress(fl.replace('/', '_'))
+        parsed = PatentParser(out_file)
+        assert len(parsed.patents) > 0
+        os.remove(fl.replace('/', '_'))
+        os.remove(out_file)
+
+    def test_version1(self):
         """
         Tests version 1 patent format and parsing
         :return:
         """
-        s3 = boto3.resource('s3')
-        my_bucket = s3.Bucket('patent-xml')
-        my_bucket.download_file('pftaps19760106_wk01.txt', 'testfl')
-        PatentParser('testfl')
-        os.remove('testfl')
+        self.parsing('1976/19760601')
 
-    def test_2(self):
+    def test_version2(self):
         """
         Tests version 2 patent format and parsing
         :return:
         """
-        s3 = boto3.resource('s3')
-        my_bucket = s3.Bucket('patent-xml')
-        my_bucket.download_file('ipg050104.xml', 'testfl')
-        PatentParser('testfl')
-        os.remove('testfl')
+        self.parsing('2004/040127')
 
-    def test_3(self):
+    def test_version3(self):
         """
         Tests version 3 patent format and parsing
         :return:
         """
-        s3 = boto3.resource('s3')
-        my_bucket = s3.Bucket('patent-xml')
-        my_bucket.download_file('ipg180227.xml', 'testfl')
-        PatentParser('testfl')
-        os.remove('testfl')
+        self.parsing('2015/150331')
 
 
 if __name__ == '__main__':

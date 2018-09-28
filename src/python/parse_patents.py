@@ -29,10 +29,12 @@ def to_csv(list_of_patents, sep=',', review_only=False):
     :param review_only: Dictates if the function should only return review articles
     :return: nodes string, edges string
     """
+    if len(list_of_patents) == 0:
+        print('FAIL')  # TODO: use logger
+
     fields = ['patent_number', 'file_date', 'grant_date', 'title', 'abstract', 'owner', 'country', 'ipcs']
     nodes = sep.join(fields) + '\n'
     edges = "patent_number{}citation\n".format(sep)
-
     for patent in list_of_patents:
         # Is the patent malformed?
         if review_only and patent.flagged_for_review:
@@ -115,11 +117,8 @@ def to_postgres(data, table='patents'):
                COPY {} FROM stdin WITH CSV HEADER
                DELIMITER as ','
                """.format(table)
-
     cur.copy_expert(sql=copy_sql, file=io.StringIO(data))
 
-    # cur.copy_from(io.StringIO(data), 'patents', columns=('patent_number', 'file_date', 'grant_date', 'title', 'abstract',
-    #                                                      'owner', 'country', 'ipc'), sep=',')
     conn.commit()
     conn.close()
 
@@ -175,6 +174,7 @@ def process(key):
     sc = SparkContext.getOrCreate()
     log4jLogger = sc._jvm.org.apache.log4j
     LOGGER = log4jLogger.LogManager.getLogger(__name__)
+
     LOGGER.info("Starting {}".format(key))
     # try:
     # Load environment variables
@@ -239,14 +239,13 @@ def main():
         if ".json" in my_object.key:
             continue
         keys_to_process.append(my_object.key)
-        # if len(keys_to_process) > 5:
-        #    break
+
 
     # Create Spark job
     # keys_to_process = [key for key in keys_to_process if int(key.split('/')[0]) > 2003]
-    sc = SparkContext().getOrCreate()
-    log4jLogger = sc._jvm.org.apache.log4j
-    LOGGER = log4jLogger.LogManager.getLogger(__name__)
+    # sc = SparkContext().getOrCreate()
+    # log4jLogger = sc._jvm.org.apache.log4j
+    # LOGGER = log4jLogger.LogManager.getLogger(__name__)
 
     edge_bucket = 'edges-to-neo4j'
     s3.create_bucket(Bucket=edge_bucket)
@@ -255,30 +254,26 @@ def main():
     for my_object in my_bucket.objects.all():
         edge_files.append(my_object.key.split('/')[0])
 
-    c = 0
-    for chunk in chunks(keys_to_process, 24):
-        # Todo: read with s3a instead and union together
-        # rdds = [sc.HadoopFile("s3a://{}/{}".format(BUCKET_NAME, key)) for key in chunk]
-        # for i in range(1, len(rdds)):
-        #     rdds[0].join(rdds[i])
-        # rdd = rdds[0]
-        if "edges_{}".format(c) in edge_files:
-            LOGGER.info("edges_{} already exists".format(c))
-            c+=1
-            continue
-        rdd = sc.parallelize(chunk, 24)
-        edges = rdd.map(process).cache()
-        edges.coalesce(1).saveAsTextFile("s3a://{}/{}".format(edge_bucket, "edges_{}".format(c)))
-        c += 1
-        LOGGER.info("edges_{} created".format(c))
+    for key in keys_to_process:
+        process(key)
 
-    # # Combine edge data
-    # files = glob.glob('edge*/part*')
-    # os.system('cat {} > edge_data.csv'.format(' '.join(files)))
-    # folders = glob.glob('edge*/')
-    # for folder in folders:
-    #     shutil.rmtree(folder)
-    # LOGGER.info(os.path.abspath('edge_data.csv'))
+    # c = 0
+    # for chunk in chunks(keys_to_process, 24):
+    #     # Todo: read with s3a instead and union together
+    #     # rdds = [sc.HadoopFile("s3a://{}/{}".format(BUCKET_NAME, key)) for key in chunk]
+    #     # for i in range(1, len(rdds)):
+    #     #     rdds[0].join(rdds[i])
+    #     # rdd = rdds[0]
+    #     if "edges_{}".format(c) in edge_files:
+    #         LOGGER.info("edges_{} already exists".format(c))
+    #         c+=1
+    #         continue
+    #     rdd = sc.parallelize(chunk, 24)
+    #     edges = rdd.map(process).cache()
+    #     edges.coalesce(1).saveAsTextFile("s3a://{}/{}".format(edge_bucket, "edges_{}".format(c)))
+    #     c += 1
+    #     LOGGER.info("edges_{} created".format(c))
+
 
 
 if __name__ == '__main__':

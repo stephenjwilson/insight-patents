@@ -3,7 +3,7 @@ from setuptools import setup
 setup(
     name='insight-patents',
     version='',
-    packages=['src', 'src.python'],
+    packages=['src.python'],
     url='https://github.com/stephenjwilson/insight-patents',
     license='',
     author='wilson',

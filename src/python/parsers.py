@@ -3,6 +3,7 @@
 Much of the parsing code was based loosely on https://github.com/iamlemec/patents/
 """
 import re
+from io import BytesIO
 from itertools import chain
 
 from lxml import etree
@@ -31,9 +32,9 @@ class PatentParser(object):
         :param file_name:
         :param detect_format:
         """
-        #sc = SparkContext()
-        #log4jLogger = sc._jvm.org.apache.log4j
-        #log = log4jLogger.LogManager.getLogger(__name__)
+        sc = SparkContext.getOrCreate()
+        log4jLogger = sc._jvm.org.apache.log4j
+        log = log4jLogger.LogManager.getLogger(__name__)
         # Passed Parameters
         self.file_name = file_name
 
@@ -48,9 +49,8 @@ class PatentParser(object):
         # Parse the data into a list of patents
         try:
             self.parser()
-        except:
-
-            print('Failed to parse {}'.format(file_name))
+        except Exception as e:
+            log.warn('Failed to parse {} with exception {}'.format(file_name, e))
 
     @staticmethod
     def get_child_text(element, tag, default=''):
@@ -74,13 +74,6 @@ class PatentParser(object):
         """
         return sep.join(element.itertext()).strip()
 
-    def handle_all(self, pp, parsing_func):
-        for (_, pat) in pp.read_events():
-            if not parsing_func(pat):
-                return False
-            self.clear(pat)
-        return True
-
     @staticmethod
     def clear(elem):
         """
@@ -102,6 +95,8 @@ class PatentParser(object):
         if line.startswith('<?xml'):
             return False
         elif line.startswith('<!DOCTYPE'):
+            return False
+        elif line.startswith('<!ENTITY') or line.startswith(']>'):
             return False
         else:
             return True
@@ -134,6 +129,10 @@ class PatentParser(object):
         elif len(pat_doc_num) < 8 and pat_doc_num.isdigit():
             return pat_doc_num.zfill(8)
         elif len(pat_doc_num) > 8 and pat_doc_num.isdigit():
+            pat_doc_num = pat_doc_num.lstrip('0')  # extra zero for some reason
+            if len(pat_doc_num) == 8:
+                return pat_doc_num
+
             # Find the instances where a year is appended to a name
             ls = year_extract.findall(pat_doc_num)
             if len(ls) != 0:
@@ -192,6 +191,7 @@ class PatentParser(object):
         Credit goes to https://github.com/iamlemec/patents/blob/master/parse_grants.py#L18
         :return:
         """
+        print('1')
         pat = None
         sec = None
         tag = None
@@ -228,10 +228,11 @@ class PatentParser(object):
             elif tag == 'WKU':
                 if sec == 'PATN':
                     cleaned = self.clean_citation(buf)
-                    if cleaned.isdigit():
+                    if cleaned is None:
+                        pat.flagged_for_review = True
+                    elif cleaned.isdigit():
                         pat.patent_number = buf
-                    elif cleaned is None:
-                        pat.flagged_for_review = True  # Malformed citation
+                    # Malformed citation
                     else:
                         ignore = True  # Types of patents not to catch
             elif tag == 'ISD':
@@ -258,7 +259,9 @@ class PatentParser(object):
             elif tag == 'PNO':
                 if sec == 'UREF':
                     cleaned = self.clean_citation(buf)
-                    if cleaned.isdigit():
+                    if cleaned is None:
+                        pass
+                    elif cleaned.isdigit():
                         pat.citations.append(cleaned)
                     else:
                         pass  # Types of patents not to catch
@@ -271,6 +274,7 @@ class PatentParser(object):
         """
         Parses v2 of the patent data.
         """
+
         def parse(elem):
             patent = Patent(self.file_name)
             # top-level section
@@ -279,15 +283,13 @@ class PatentParser(object):
             # published patent
             patnum = self.get_child_text(bib.find('B100'), 'B110/DNUM/PDAT')
             cleaned = self.clean_citation(patnum)
-
-            if cleaned.isdigit():
-                patent.patent_number = cleaned
-            elif cleaned is None:
+            if cleaned is None:
                 patent.flagged_for_review = True  # Malformed citation
                 patent.patent_number = patnum
+            elif cleaned.isdigit():
+                patent.patent_number = cleaned
             else:
                 return  # Ignore certain types of patents
-
             patent.grant_date = self.get_child_text(bib.find('B100'), 'B140/DATE/PDAT')
             patent.file_date = self.get_child_text(bib.find('B200'), 'B220/DATE/PDAT')
 
@@ -310,10 +312,10 @@ class PatentParser(object):
                 for cite in refs.findall('B561'):
                     citation = self.get_child_text(cite, 'PCIT/DOC/DNUM/PDAT')
                     cleaned = self.clean_citation(citation)
-                    if cleaned.isdigit():
+                    if cleaned is None:
+                        pass
+                    elif cleaned.isdigit():
                         cites.append(cleaned)
-                    elif cleaned is None:
-                        patent.flagged_for_review = True  # Malformed citation
                     else:
                         pass  # Types of patents not to catch
 
@@ -335,26 +337,20 @@ class PatentParser(object):
             if len(abspars) > 0:
                 patent.abstract = '\n'.join([self.raw_text(e) for e in abspars])
             self.patents.append(patent)
+            return True
 
-        pp = etree.XMLPullParser(tag='us-patent-grant', events=['end'], recover=True)
-        with open(self.file_name, errors='ignore') as f:
-            pp.feed('<root>\n')
-            for line in f:
-                if line.startswith('<?xml'):
-                    if not self.handle_all(pp, parse):
-                        break
-                elif line.startswith('<!DOCTYPE'):
-                    pass
-                else:
-                    pp.feed(line)
-            else:
-                pp.feed('</root>\n')
-                self.handle_all(pp, parse)
+        lines = [line for line in open(self.file_name).readlines() if self.acceptable(line)]  # TODO: maybe optimize
+        lines = ['<root>\n'] + lines + ['</root>\n']
+        context = etree.iterparse(BytesIO(''.join(lines).encode('utf-8')), tag='PATDOC', events=['end'],
+                                  recover=True)
+        for (_, elem) in context:
+            parse(elem)
 
     def parse_v3(self):
         """
         Parses v3 of the patent data
         """
+
         def parse(elem):
             patent = Patent(self.file_name)
 
@@ -367,12 +363,11 @@ class PatentParser(object):
             pubinfo = pubref.find('document-id')
             patnum = self.get_child_text(pubinfo, 'doc-number')
             cleaned = self.clean_citation(patnum)
-
-            if cleaned.isdigit():
-                patent.patent_number = cleaned
-            elif cleaned is None:
+            if cleaned is None:
                 patent.flagged_for_review = True  # Malformed citation
                 patent.patent_number = patnum
+            elif cleaned.isdigit():
+                patent.patent_number = cleaned
             else:
                 return  # Ignore certain types of patents
 
@@ -417,7 +412,9 @@ class PatentParser(object):
                         kind = self.get_child_text(docid, 'kind')
 
                         cleaned = self.clean_citation(pnum)
-                        if cleaned.isdigit():
+                        if cleaned is not None:
+                            pass
+                        elif cleaned.isdigit():
                             cites.append(cleaned)
                         else:
                             pass  # Types of patents not to catch / citations to ignore
@@ -438,17 +435,9 @@ class PatentParser(object):
 
             self.patents.append(patent)
 
-        pp = etree.XMLPullParser(tag='us-patent-grant', events=['end'], recover=True)
-        with open(self.file_name, errors='ignore') as f:
-            pp.feed('<root>\n')
-            for line in f:
-                if line.startswith('<?xml'):
-                    if not self.handle_all(pp, parse):
-                        break
-                elif line.startswith('<!DOCTYPE'):
-                    pass
-                else:
-                    pp.feed(line)
-            else:
-                pp.feed('</root>\n')
-                self.handle_all(pp, parse)
+        lines = [line for line in open(self.file_name).readlines() if self.acceptable(line)]  # TODO: maybe optimize
+        lines = ['<root>\n'] + lines + ['</root>\n']
+        context = etree.iterparse(BytesIO(''.join(lines).encode('utf-8')), tag='us-patent-grant', events=['end'],
+                                  recover=True)
+        for (_, elem) in context:
+            parse(elem)
