@@ -31,9 +31,9 @@ class PatentParser(object):
         :param file_name:
         :param detect_format:
         """
-        sc = SparkContext()
-        log4jLogger = sc._jvm.org.apache.log4j
-        log = log4jLogger.LogManager.getLogger(__name__)
+        #sc = SparkContext()
+        #log4jLogger = sc._jvm.org.apache.log4j
+        #log = log4jLogger.LogManager.getLogger(__name__)
         # Passed Parameters
         self.file_name = file_name
 
@@ -49,7 +49,8 @@ class PatentParser(object):
         try:
             self.parser()
         except:
-            log.warn('Failed to parse {}'.format(file_name))
+
+            print('Failed to parse {}'.format(file_name))
 
     @staticmethod
     def get_child_text(element, tag, default=''):
