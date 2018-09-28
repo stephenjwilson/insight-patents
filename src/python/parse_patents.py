@@ -190,20 +190,20 @@ def process(key):
         logging.info("Parsed {}".format(key))
         nodes, edges = to_csv(patent_parser.patents)
 
-    # send nodes to postgres
-    try:
-        to_postgres(nodes)
-    except psycopg2.IntegrityError:
-        pass
+        # send nodes to postgres
+        try:
+            to_postgres(nodes)
+        except psycopg2.IntegrityError:
+            pass
 
-    # send out malformed data
-    nodes, edges = to_csv(patent_parser.patents, review_only=True)
+        # send out malformed data
+        nodes, edges = to_csv(patent_parser.patents, review_only=True)
 
-    # send nodes to postgres
-    try:
-        to_postgres(nodes, table='patents_to_review')
-    except psycopg2.IntegrityError:
-        pass
+        # send nodes to postgres
+        try:
+            to_postgres(nodes, table='patents_to_review')
+        except psycopg2.IntegrityError:
+            pass
 
         # Remove files
         os.remove(file_name)
