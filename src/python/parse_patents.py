@@ -46,6 +46,10 @@ def to_csv(list_of_patents, sep=',', review_only=False):
             edges += patent.to_neo4j_relationships()
         else:
             pass  # ignore the patent
+    # reset edges if none exist
+    if edges == "patent_number{}citation\n".format(sep):
+        edges = ''
+
     return nodes, edges
 
 
@@ -172,6 +176,7 @@ def process(key):
     sc = SparkContext.getOrCreate()
     log4jLogger = sc._jvm.org.apache.log4j
     LOGGER = log4jLogger.LogManager.getLogger(__name__)
+    LOGGER.setLevel(logging.WARN)
 
     LOGGER.info("Starting {}".format(key))
     try:
@@ -210,6 +215,8 @@ def process(key):
     except Exception as e:
         LOGGER.warn('Failed on {}, with exception: {}'.format(key, e))
         edges = ''
+    if edges == '':
+        LOGGER.warn('Not getting edges for {}!'.format(key))
 
     return edges
 
