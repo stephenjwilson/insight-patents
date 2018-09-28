@@ -224,7 +224,7 @@ def chunks(l, n):
         yield l[i:i + n]
 
 
-def main():
+def main(local=False):
     """
     Main Function that downloads, decompresses, and parses the USTPO XML data before dumping it into a
     PostgreSQL and a Neo4j database.
@@ -267,8 +267,12 @@ def main():
             continue
         rdd = sc.parallelize(chunk, 24)
         edges = rdd.map(process).cache()
-        edges.filter(lambda x: x != "").coalesce(1).saveAsTextFile(
-            "s3a://{}/{}".format(edge_bucket, "edges_{}".format(c)))
+        if local:
+            edges.filter(lambda x: x != "").coalesce(1).saveAsTextFile(
+                "{}/{}".format(edge_bucket, "edges_{}".format(c)))
+        else:
+            edges.filter(lambda x: x != "").coalesce(1).saveAsTextFile(
+                "s3a://{}/{}".format(edge_bucket, "edges_{}".format(c)))
         c += 1
         LOGGER.info("edges_{} created".format(c))
 
