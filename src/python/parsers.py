@@ -2,6 +2,7 @@
 
 Much of the parsing code was based loosely on https://github.com/iamlemec/patents/
 """
+import datetime
 import re
 from io import BytesIO
 from itertools import chain
@@ -102,6 +103,28 @@ class PatentParser(object):
             return True
 
     @staticmethod
+    def clean_date(date):
+        """
+        Cleans dates extracted from patents. Return the NULL 1900-01-01 if it fails to format the date
+        :param date:
+        :return:
+        """
+        if len(date) > 8:
+            date = '19000101'
+        if date[-2:] == '00':  # Days can't be 0
+            date = date[:-2] + '01'
+        if int(date[:2]) != 20 and int(date[:2]) != 19:
+            date = date[1] + date[0] + date[2:]  # Fix an easy transposition
+            if int(date[:2]) != 20 and int(date[:2]) != 19:
+                date = '19000101'
+        try:
+            date = datetime.datetime.strptime(str(date), '%Y%m%d').strftime('%Y-%m-%d')
+        except:
+            date = '1900-01-01'
+
+        return date
+
+    @staticmethod
     def clean_citation(pat_doc_num):
         """
 
@@ -191,7 +214,6 @@ class PatentParser(object):
         Credit goes to https://github.com/iamlemec/patents/blob/master/parse_grants.py#L18
         :return:
         """
-        print('1')
         pat = None
         sec = None
         tag = None
@@ -237,10 +259,10 @@ class PatentParser(object):
                         ignore = True  # Types of patents not to catch
             elif tag == 'ISD':
                 if sec == 'PATN':
-                    pat.grant_date = buf
+                    pat.grant_date = self.clean_date(buf)
             elif tag == 'APD':
                 if sec == 'PATN':
-                    pat.file_date = buf
+                    pat.file_date = self.clean_date(buf)
             elif tag == 'ICL':
                 if sec == 'CLAS':
                     pat.ipcs.append(buf)
@@ -290,8 +312,8 @@ class PatentParser(object):
                 patent.patent_number = cleaned
             else:
                 return  # Ignore certain types of patents
-            patent.grant_date = self.get_child_text(bib.find('B100'), 'B140/DATE/PDAT')
-            patent.file_date = self.get_child_text(bib.find('B200'), 'B220/DATE/PDAT')
+            patent.grant_date = self.clean_date(self.get_child_text(bib.find('B100'), 'B140/DATE/PDAT'))
+            patent.file_date = self.clean_date(self.get_child_text(bib.find('B200'), 'B220/DATE/PDAT'))
 
             # ipc code
             patref = bib.find('B500')
@@ -371,8 +393,8 @@ class PatentParser(object):
             else:
                 return  # Ignore certain types of patents
 
-            patent.grant_date = self.get_child_text(pubinfo, 'date')
-            patent.file_date = self.get_child_text(appref, 'document-id/date')
+            patent.grant_date = self.clean_date(self.get_child_text(pubinfo, 'date'))
+            patent.file_date = self.clean_date(self.get_child_text(appref, 'document-id/date'))
             patent.title = self.get_child_text(bib, 'invention-title')
 
             # ipc codes

@@ -29,8 +29,6 @@ def to_csv(list_of_patents, sep=',', review_only=False):
     :param review_only: Dictates if the function should only return review articles
     :return: nodes string, edges string
     """
-    if len(list_of_patents) == 0:
-        print('FAIL')  # TODO: use logger
 
     fields = ['patent_number', 'file_date', 'grant_date', 'title', 'abstract', 'owner', 'country', 'ipcs']
     nodes = sep.join(fields) + '\n'
@@ -176,41 +174,42 @@ def process(key):
     LOGGER = log4jLogger.LogManager.getLogger(__name__)
 
     LOGGER.info("Starting {}".format(key))
-    # try:
-    # Load environment variables
-    load_dotenv(find_dotenv())
-    # Download, decompress, and determine format of data TODO: do in memory
-    file_name = download_from_s3(key)
-
-    decompress_name = decompress(file_name)
-
-    # Parse Data and output to csv
-    patent_parser = PatentParser(decompress_name)
-
-    logging.info("Parsed {}".format(key))
-    nodes, edges = to_csv(patent_parser.patents)
-
-    # send nodes to postgres
     try:
-        to_postgres(nodes)
-    except psycopg2.IntegrityError:
-        pass
+        # Load environment variables
+        load_dotenv(find_dotenv())
 
-    # send out malformed data
-    nodes, edges = to_csv(patent_parser.patents, review_only=True)
+        # Download, decompress, and determine format of data TODO: do in memory
+        file_name = download_from_s3(key)
 
-    # send nodes to postgres
-    try:
-        to_postgres(nodes, table='patents_to_review')
-    except psycopg2.IntegrityError:
-        pass
+        decompress_name = decompress(file_name)
 
-    # Remove files
-    os.remove(file_name)
-    os.remove(decompress_name)
-    # except Exception as e:
-    #     LOGGER.warn('Failed on {}, with exception: {}'.format(key, e))
-    #     edges = ''
+        # Parse Data and output to csv
+        patent_parser = PatentParser(decompress_name)
+
+        logging.info("Parsed {}".format(key))
+        nodes, edges = to_csv(patent_parser.patents)
+
+        # send nodes to postgres
+        try:
+            to_postgres(nodes)
+        except psycopg2.IntegrityError:
+            pass
+
+        # send out malformed data
+        nodes, edges = to_csv(patent_parser.patents, review_only=True)
+
+        # send nodes to postgres
+        try:
+            to_postgres(nodes, table='patents_to_review')
+        except psycopg2.IntegrityError:
+            pass
+
+        # Remove files
+        os.remove(file_name)
+        os.remove(decompress_name)
+    except Exception as e:
+        LOGGER.warn('Failed on {}, with exception: {}'.format(key, e))
+        edges = ''
 
     return edges
 
@@ -240,13 +239,12 @@ def main():
             continue
         keys_to_process.append(my_object.key)
 
+    # Create Spark Context
+    sc = SparkContext().getOrCreate()
+    log4jLogger = sc._jvm.org.apache.log4j
+    LOGGER = log4jLogger.LogManager.getLogger(__name__)
 
-    # Create Spark job
-    # keys_to_process = [key for key in keys_to_process if int(key.split('/')[0]) > 2003]
-    # sc = SparkContext().getOrCreate()
-    # log4jLogger = sc._jvm.org.apache.log4j
-    # LOGGER = log4jLogger.LogManager.getLogger(__name__)
-
+    # Get list of all files already processed
     edge_bucket = 'edges-to-neo4j'
     s3.create_bucket(Bucket=edge_bucket)
     my_bucket = s3.Bucket(edge_bucket)
@@ -254,26 +252,19 @@ def main():
     for my_object in my_bucket.objects.all():
         edge_files.append(my_object.key.split('/')[0])
 
-    for key in keys_to_process:
-        process(key)
-
-    # c = 0
-    # for chunk in chunks(keys_to_process, 24):
-    #     # Todo: read with s3a instead and union together
-    #     # rdds = [sc.HadoopFile("s3a://{}/{}".format(BUCKET_NAME, key)) for key in chunk]
-    #     # for i in range(1, len(rdds)):
-    #     #     rdds[0].join(rdds[i])
-    #     # rdd = rdds[0]
-    #     if "edges_{}".format(c) in edge_files:
-    #         LOGGER.info("edges_{} already exists".format(c))
-    #         c+=1
-    #         continue
-    #     rdd = sc.parallelize(chunk, 24)
-    #     edges = rdd.map(process).cache()
-    #     edges.coalesce(1).saveAsTextFile("s3a://{}/{}".format(edge_bucket, "edges_{}".format(c)))
-    #     c += 1
-    #     LOGGER.info("edges_{} created".format(c))
-
+    # Process keys in chunks
+    c = 0
+    for chunk in chunks(keys_to_process, 24):
+        # Todo: read with s3a instead and union together
+        if "edges_{}".format(c) in edge_files:  # Skip files that already exist
+            LOGGER.info("edges_{} already exists".format(c))
+            c += 1
+            continue
+        rdd = sc.parallelize(chunk, 24)
+        edges = rdd.map(process).cache()
+        edges.coalesce(1).saveAsTextFile("s3a://{}/{}".format(edge_bucket, "edges_{}".format(c)))
+        c += 1
+        LOGGER.info("edges_{} created".format(c))
 
 
 if __name__ == '__main__':

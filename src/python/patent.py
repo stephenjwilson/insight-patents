@@ -1,7 +1,6 @@
 """
 The Patent class, which contains the fields of interest for storing data from XML
 """
-import datetime
 import re
 
 
@@ -68,18 +67,6 @@ class Patent(object):
                 if type(val) == str:
                     val = val.replace('"', '').replace(",", '')
                     val = pattern.sub('', val)
-
-                    if 'date' in field:
-                        if len(val)>8:
-                            val = '1900-01-01'
-                        if val[-2:] == '00':
-                            val = val[:-2] + '01'
-                        if int(val[:2]) != 20 and int(val[:2]) != 19:
-                            val = '1900-01-01'
-                        try:
-                            val = datetime.datetime.strptime(str(val), '%Y%m%d').strftime('%Y-%m-%d')
-                        except:
-                            val = '1900-01-01'
                         
                 elif type(val) == list:
                     if 'ipc' in field:
