@@ -173,7 +173,7 @@ def process(key):
     sc = SparkContext.getOrCreate()
     log4jLogger = sc._jvm.org.apache.log4j
     LOGGER = log4jLogger.LogManager.getLogger(__name__)
-    LOGGER.setLevel(2)
+    # LOGGER.setLevel("WARN")
 
     LOGGER.info("Starting {}".format(key))
     try:
