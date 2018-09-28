@@ -176,40 +176,41 @@ def process(key):
     log4jLogger = sc._jvm.org.apache.log4j
     LOGGER = log4jLogger.LogManager.getLogger(__name__)
     LOGGER.info("Starting {}".format(key))
+    # try:
+    # Load environment variables
+    load_dotenv(find_dotenv())
+    # Download, decompress, and determine format of data TODO: do in memory
+    file_name = download_from_s3(key)
+
+    decompress_name = decompress(file_name)
+
+    # Parse Data and output to csv
+    patent_parser = PatentParser(decompress_name)
+
+    logging.info("Parsed {}".format(key))
+    nodes, edges = to_csv(patent_parser.patents)
+
+    # send nodes to postgres
     try:
-        # Load environment variables
-        load_dotenv(find_dotenv())
-        # Download, decompress, and determine format of data TODO: do in memory
-        file_name = download_from_s3(key)
+        to_postgres(nodes)
+    except psycopg2.IntegrityError:
+        pass
 
-        decompress_name = decompress(file_name)
+    # send out malformed data
+    nodes, edges = to_csv(patent_parser.patents, review_only=True)
 
-        # Parse Data and output to csv
-        patent_parser = PatentParser(decompress_name)
+    # send nodes to postgres
+    try:
+        to_postgres(nodes, table='patents_to_review')
+    except psycopg2.IntegrityError:
+        pass
 
-        logging.info("Parsed {}".format(key))
-        nodes, edges = to_csv(patent_parser.patents)
-
-        # send nodes to postgres
-        try:
-            to_postgres(nodes)
-        except psycopg2.IntegrityError:
-            pass
-
-        # send out malformed data
-        nodes, edges = to_csv(patent_parser.patents, review_only=True)
-
-        # send nodes to postgres
-        try:
-            to_postgres(nodes, table='patents_to_review')
-        except psycopg2.IntegrityError:
-            pass
-
-        # Remove files
-        os.remove(file_name)
-        os.remove(decompress_name)
-    except Exception as e:
-        LOGGER.warn('Failed on {}, with excetption: {}'.format(key,e))
+    # Remove files
+    os.remove(file_name)
+    os.remove(decompress_name)
+    # except Exception as e:
+    #     LOGGER.warn('Failed on {}, with exception: {}'.format(key, e))
+    #     edges = ''
 
     return edges
 
