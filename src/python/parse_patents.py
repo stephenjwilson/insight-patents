@@ -238,34 +238,34 @@ def main():
         if ".json" in my_object.key:
             continue
         keys_to_process.append(my_object.key)
-    process(keys_to_process[0])
+    # process(keys_to_process[0])
 
-    # # Create Spark Context
-    # sc = SparkContext().getOrCreate()
-    # log4jLogger = sc._jvm.org.apache.log4j
-    # LOGGER = log4jLogger.LogManager.getLogger(__name__)
-    #
-    # # Get list of all files already processed
-    # edge_bucket = 'edges-to-neo4j'
-    # s3.create_bucket(Bucket=edge_bucket)
-    # my_bucket = s3.Bucket(edge_bucket)
-    # edge_files = []
-    # for my_object in my_bucket.objects.all():
-    #     edge_files.append(my_object.key.split('/')[0])
-    #
-    # # Process keys in chunks
-    # c = 0
-    # for chunk in chunks(keys_to_process, 24):
-    #     # Todo: read with s3a instead and union together
-    #     if "edges_{}".format(c) in edge_files:  # Skip files that already exist
-    #         LOGGER.info("edges_{} already exists".format(c))
-    #         c += 1
-    #         continue
-    #     rdd = sc.parallelize(chunk, 24)
-    #     edges = rdd.map(process).cache()
-    #     edges.coalesce(1).saveAsTextFile("s3a://{}/{}".format(edge_bucket, "edges_{}".format(c)))
-    #     c += 1
-    #     LOGGER.info("edges_{} created".format(c))
+    # Create Spark Context
+    sc = SparkContext().getOrCreate()
+    log4jLogger = sc._jvm.org.apache.log4j
+    LOGGER = log4jLogger.LogManager.getLogger(__name__)
+
+    # Get list of all files already processed
+    edge_bucket = 'edges-to-neo4j'
+    s3.create_bucket(Bucket=edge_bucket)
+    my_bucket = s3.Bucket(edge_bucket)
+    edge_files = []
+    for my_object in my_bucket.objects.all():
+        edge_files.append(my_object.key.split('/')[0])
+
+    # Process keys in chunks
+    c = 0
+    for chunk in chunks(keys_to_process, 24):
+        # Todo: read with s3a instead and union together
+        if "edges_{}".format(c) in edge_files:  # Skip files that already exist
+            LOGGER.info("edges_{} already exists".format(c))
+            c += 1
+            continue
+        rdd = sc.parallelize(chunk, 24)
+        edges = rdd.map(process).cache()
+        edges.coalesce(1).saveAsTextFile("s3a://{}/{}".format(edge_bucket, "edges_{}".format(c)))
+        c += 1
+        LOGGER.info("edges_{} created".format(c))
 
 
 if __name__ == '__main__':
