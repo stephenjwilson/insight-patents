@@ -9,12 +9,11 @@ class Patent(object):
     The Patent class, which contains the fields of interest for storing data from XML
     """
 
-    def __init__(self, source_file_name, patent_number=None, file_date=None, title=None, grant_date=None,
+    def __init__(self, patent_number=None, file_date=None, title=None, grant_date=None,
                  abstract="", owner=None, country=None, ipcs=None, citations=None, chemicals=None):
         """
         The initialization method of Patent, which requires the name of the file the patent is from,
         optionally takes more parameters.
-        :param source_file_name: The name of the file that contained the patent
         :param patent_number: The patent number from the USTPO
         :param file_date: The data the patent was filed
         :param title: The title of the patent
@@ -27,7 +26,6 @@ class Patent(object):
         :param chemicals: A list of chemicals referenced in the patent
 
         """
-        self.file_name = source_file_name
         self.patent_number = patent_number
         self.file_date = file_date
         self.title = title

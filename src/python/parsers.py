@@ -6,13 +6,11 @@ import datetime
 import re
 from io import BytesIO
 from itertools import chain
-
 from lxml import etree
 from pyspark import SparkContext
+from IPython import embed
 
 from src.python.patent import Patent
-
-
 #from patent import Patent
 
 
@@ -24,7 +22,7 @@ class PatentParser(object):
 
     # TODO: add support for chemicals
     # TODO: Ensure it's a grant?
-    def __init__(self, file_name, detect_format=True):
+    def __init__(self, data, detect_format=True):
         """
         This parsing class takes a file name and will detect the format of the file based on the extension
         if desired. If it doesn't detect the format, it assumes the latest format.
@@ -37,7 +35,7 @@ class PatentParser(object):
         log4jLogger = sc._jvm.org.apache.log4j
         log = log4jLogger.LogManager.getLogger(__name__)
         # Passed Parameters
-        self.file_name = file_name
+        self.data = data
 
         # Other Parameters - to be defined
         self.generation = None
@@ -45,15 +43,17 @@ class PatentParser(object):
         self.patents = []
         self.totalpatents = 0
         self.citationpatents = 0
-        if detect_format:
-            # Check file format / generation
-            self.determine_patent_type()
+        self.split_strings = {
+            'PATN': self.parse_v1,
+            'us-patent-grant': self.parse_v3,
+            'PATDOC': self.parse_v3
+        }
+        # Use the appropriate parser
 
-        # Parse the data into a list of patents
-        try:
-            self.parser()
-        except Exception as e:
-            log.warn('Failed to parse {} with exception {}'.format(file_name, e))
+        for key in self.split_strings:
+            if key in self.data[:10]:
+                print(self.split_strings[key])
+                self.split_strings[key]()
 
     @staticmethod
     def get_child_text(element, tag, default=''):
@@ -190,26 +190,6 @@ class PatentParser(object):
 
             return None  # Failure. Send to human review
 
-    def determine_patent_type(self):
-        """
-        Determines patent version and parser
-        :param file_name:
-        :return:
-        """
-
-        if 'aps' in self.file_name:
-            self.generation = 1
-            self.parser = self.parse_v1
-        elif 'ipg' in self.file_name:
-            self.generation = 3
-            self.parser = self.parse_v3
-        elif 'pg' in self.file_name:
-            self.generation = 2
-            self.parser = self.parse_v2
-        else:
-            self.parser = self.parse_v2  # try parse v2
-            # raise (Exception('Unknown format'))
-
     def parse_v1(self):
         """
         Parses v1 of the patent data.
@@ -221,7 +201,7 @@ class PatentParser(object):
         tag = None
         ipcver = None
         ignore = False
-        for nline in chain(open(self.file_name, encoding='latin1', errors='ignore'), ['PATN']):
+        for nline in chain(self.data.split('\r\n'), ['PATN']):
             # peek at next line
             (ntag, nbuf) = (nline[:4].rstrip(), nline[5:-1].rstrip())
             if tag is None:
@@ -242,7 +222,7 @@ class PatentParser(object):
                             self.citationpatents += 1
                     else:
                         ignore = False
-                pat = Patent(self.file_name)
+                pat = Patent()
                 self.totalpatents += 1
 
                 sec = 'PATN'
@@ -258,7 +238,6 @@ class PatentParser(object):
                         pat.flagged_for_review = True
                     elif cleaned.isdigit():
                         pat.patent_number = buf
-                    # Malformed citation
                     else:
                         ignore = True  # Types of patents not to catch
             elif tag == 'ISD':
@@ -302,7 +281,7 @@ class PatentParser(object):
         """
 
         def parse(elem):
-            patent = Patent(self.file_name)
+            patent = Patent()
             self.totalpatents += 1
             # top-level section
             bib = elem.find('SDOBI')
@@ -367,7 +346,7 @@ class PatentParser(object):
             self.patents.append(patent)
             return True
 
-        lines = [line for line in open(self.file_name).readlines() if self.acceptable(line)]  # TODO: maybe optimize
+        lines = [line for line in self.data.split('\r\n') if self.acceptable(line)]  # TODO: maybe optimize
         lines = ['<root>\n'] + lines + ['</root>\n']
         context = etree.iterparse(BytesIO(''.join(lines).encode('utf-8')), tag='PATDOC', events=['end'],
                                   recover=True)
@@ -381,7 +360,7 @@ class PatentParser(object):
 
         def parse(elem):
             self.totalpatents += 1
-            patent = Patent(self.file_name)
+            patent = Patent()
 
             # top-level section
             bib = elem.find('us-bibliographic-data-grant')
@@ -467,7 +446,7 @@ class PatentParser(object):
 
             self.patents.append(patent)
 
-        lines = [line for line in open(self.file_name).readlines() if self.acceptable(line)]  # TODO: maybe optimize
+        lines = [line for line in self.data.split('\r\n') if self.acceptable(line)]  # TODO: maybe optimize
         lines = ['<root>\n'] + lines + ['</root>\n']
         context = etree.iterparse(BytesIO(''.join(lines).encode('utf-8')), tag='us-patent-grant', events=['end'],
                                   recover=True)

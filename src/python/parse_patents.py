@@ -6,7 +6,7 @@ import io
 import logging
 import os
 import zipfile
-
+from IPython import embed
 import boto3
 import botocore
 import psycopg2
@@ -14,7 +14,6 @@ from dotenv import load_dotenv, find_dotenv
 from pyspark import SparkContext
 
 from src.python.parsers import PatentParser
-
 #from parsers import PatentParser
 
 BUCKET_NAME = 'patent-xml-zipped'
@@ -128,10 +127,8 @@ def decompress(file_name):
     :return: Returns the name of the decompressed file
     """
     zip_ref = zipfile.ZipFile(file_name, 'r')
-    out_name = zip_ref.filelist[0].filename
-    zip_ref.extractall('/'.join(file_name.split('/')[:-1]))
-    zip_ref.close()
-    return out_name
+    name = zip_ref.namelist()[0]
+    return name, zip_ref.read(name)
 
 
 def download_from_s3(key, output_name=None, bucket=None):
@@ -165,7 +162,7 @@ def download_from_s3(key, output_name=None, bucket=None):
     return output_name
 
 
-def process(key):
+def process(data):
     """
     Applys an ETL pipeline for patents on a particular key from a S3 bucket
     :param key: This is the key for the S3 Bucket
@@ -175,21 +172,17 @@ def process(key):
     log = log4jLogger.LogManager.getLogger(__name__)
     # LOGGER.setLevel("WARN")
 
-    log.info("Starting {}".format(key))
     try:
         # Load environment variables
         load_dotenv(find_dotenv())
 
         # Download, decompress, and determine format of data TODO: do in memory
-        file_name = download_from_s3(key)
-
-        decompress_name = decompress(file_name)
 
         # Parse Data and output to csv
-        patent_parser = PatentParser(decompress_name)
+        patent_parser = PatentParser(data)
 
-        log.warn("Parsed {}, with {} patents seen and {} processed".format(key, patent_parser.totalpatents,
-                                                                           len(patent_parser.patents)))
+        log.warn("Parsed with {} patents seen and {} processed".format(patent_parser.totalpatents,
+                                                                       len(patent_parser.patents)))
         log.warn("{} patents with citations".format(patent_parser.citationpatents))
         log.warn("{} citations\n".format(sum([len(x.citations) for x in patent_parser.patents])))
 
@@ -210,25 +203,43 @@ def process(key):
             except psycopg2.IntegrityError:
                 pass
 
-        # Remove files
-        os.remove(file_name)
-        os.remove(decompress_name)
     except Exception as e:
-        log.warn('Failed on {}, with exception: {}'.format(key, e))
+        log.warn('Failed with exception: {}'.format(e))
         edges = ''
     if edges == '':
-        log.warn('Not getting edges for {}!'.format(key))
+        log.warn('Not getting edges')
 
     return edges
 
 
-def chunks(l, n):
+def clean_and_split(data, name):
+    split_strings = {
+        'aps': 'PATN',
+        'ipg': '<us-patent-grant',
+        'pg': '<PATDOC'
+    }
+    # split file as appropriate
+    if 'aps' in name:
+        split_string = split_strings['aps']
+        chunks = [split_string + x for x in data.decode('utf-8').split(split_string)][1:]
+    elif 'ipg' in name:
+        split_string = split_strings['ipg']
+        chunks = [split_string + x for x in data.decode('utf-8').split(split_string)][1:]
+    elif 'pg' in name:
+        split_string = split_strings['pg']
+        chunks = [split_string + x for x in data.decode('utf-8').split(split_string)][1:]
+    else:
+        chunks = []
+    return chunks
+
+
+def chunk_list(l, n):
     """Yield successive n-sized chunks from l."""
     for i in range(0, len(l), n):
         yield l[i:i + n]
 
 
-def main(local=False):
+def main(local=True, num_of_patents_to_process=10000, partitions=2):
     """
     Main Function that downloads, decompresses, and parses the USTPO XML data before dumping it into a
     PostgreSQL and a Neo4j database.
@@ -263,22 +274,42 @@ def main(local=False):
 
     # Process keys in chunks
     c = 0
-    for chunk in chunks(keys_to_process, 6):
+    all_chunks = []
+    for key in keys_to_process:
         # Todo: read with s3a instead and union together
         if "edges_{}".format(c) in edge_files:  # Skip files that already exist
             log.info("edges_{} already exists".format(c))
             c += 1
             continue
-        rdd = sc.parallelize(chunk, 6)
-        edges = rdd.map(process).cache()
-        if local:
-            edges.filter(lambda x: x != "\n" and x != "").coalesce(1).saveAsTextFile(
-                "{}/{}".format(edge_bucket, "edges_{}".format(c)))
-        else:
-            edges.filter(lambda x: x != "").coalesce(1).saveAsTextFile(
-                "s3a://{}/{}".format(edge_bucket, "edges_{}".format(c)))
-        c += 1
-        log.info("edges_{} created".format(c))
+        # get file
+        file_name = download_from_s3(key)
+        name, data = decompress(file_name)
+        # os.remove(file_name)
+
+        chunks = clean_and_split(data, name)
+        if not chunks:
+            log.info("key {} failed on split".format(key))
+            continue
+
+        all_chunks += chunks
+        if len(all_chunks) > num_of_patents_to_process:
+            pieces = [''.join(x) for x in chunk_list(all_chunks, int(len(all_chunks)/partitions))]
+            # edges = process(pieces[0])
+            # embed()
+            # exit()
+            # Distribute data
+            rdd = sc.parallelize(pieces, partitions)
+            edges = rdd.map(process).collect()
+            if local:
+                edges.filter(lambda x: x != "\n" and x != "").coalesce(1).saveAsTextFile(
+                    "{}/{}".format(edge_bucket, "edges_{}".format(c)))
+            else:
+                edges.filter(lambda x: x != "\n" and x != "").coalesce(1).saveAsTextFile(
+                    "s3a://{}/{}".format(edge_bucket, "edges_{}".format(c)))
+            c += 1
+            log.info("edges_{} created".format(c))
+            exit()
+            all_chunks = []
 
 
 if __name__ == '__main__':
