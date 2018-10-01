@@ -43,6 +43,8 @@ class PatentParser(object):
         self.generation = None
         self.parser = self.parse_v3  # default is v3 XML
         self.patents = []
+        self.totalpatents = 0
+        self.citationpatents = 0
         if detect_format:
             # Check file format / generation
             self.determine_patent_type()
@@ -236,10 +238,12 @@ class PatentParser(object):
                     pat.ipcs = [(ipc, ipcver) for ipc in pat.ipcs]
                     if not ignore:
                         self.patents.append(pat)
+                        if pat.citations:
+                            self.citationpatents += 1
                     else:
                         ignore = False
                 pat = Patent(self.file_name)
-                citations = []
+                self.totalpatents += 1
 
                 sec = 'PATN'
             elif tag in ['INVT', 'ASSG', 'PRIR', 'CLAS', 'UREF', 'FREF', 'OREF', 'LREP', 'PCTA', 'ABST']:
@@ -299,6 +303,7 @@ class PatentParser(object):
 
         def parse(elem):
             patent = Patent(self.file_name)
+            self.totalpatents += 1
             # top-level section
             bib = elem.find('SDOBI')
 
@@ -340,7 +345,8 @@ class PatentParser(object):
                         cites.append(cleaned)
                     else:
                         pass  # Types of patents not to catch
-
+                if cites:
+                    self.citationpatents += 1
             patent.citations = cites
 
             # title
@@ -374,6 +380,7 @@ class PatentParser(object):
         """
 
         def parse(elem):
+            self.totalpatents += 1
             patent = Patent(self.file_name)
 
             # top-level section
@@ -429,6 +436,7 @@ class PatentParser(object):
                 for cite in refs.findall(prefix + 'citation'):
                     pcite = cite.find('patcit')
                     if pcite is not None:
+
                         docid = pcite.find('document-id')
                         pnum = self.get_child_text(docid, 'doc-number')
                         kind = self.get_child_text(docid, 'kind')
@@ -440,6 +448,8 @@ class PatentParser(object):
                             cites.append(cleaned)
                         else:
                             pass  # Types of patents not to catch / citations to ignore
+                if cites:
+                    self.citationpatents += 1
 
             patent.citations = cites
 

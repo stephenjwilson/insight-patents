@@ -172,10 +172,10 @@ def process(key):
     """
     sc = SparkContext.getOrCreate()
     log4jLogger = sc._jvm.org.apache.log4j
-    LOGGER = log4jLogger.LogManager.getLogger(__name__)
+    log = log4jLogger.LogManager.getLogger(__name__)
     # LOGGER.setLevel("WARN")
 
-    LOGGER.info("Starting {}".format(key))
+    log.info("Starting {}".format(key))
     try:
         # Load environment variables
         load_dotenv(find_dotenv())
@@ -188,7 +188,11 @@ def process(key):
         # Parse Data and output to csv
         patent_parser = PatentParser(decompress_name)
 
-        logging.info("Parsed {}".format(key))
+        log.warn("Parsed {}, with {} patents seen and {} processed".format(key, patent_parser.totalpatents,
+                                                                           len(patent_parser.patents)))
+        log.warn("{} patents with citations".format(patent_parser.citationpatents))
+        log.warn("{} citations\n".format(sum([len(x.citations) for x in patent_parser.patents])))
+
         nodes, edges = to_csv(patent_parser.patents)
 
         # send nodes to postgres
@@ -210,10 +214,10 @@ def process(key):
         os.remove(file_name)
         os.remove(decompress_name)
     except Exception as e:
-        LOGGER.warn('Failed on {}, with exception: {}'.format(key, e))
+        log.warn('Failed on {}, with exception: {}'.format(key, e))
         edges = ''
     if edges == '':
-        LOGGER.warn('Not getting edges for {}!'.format(key))
+        log.warn('Not getting edges for {}!'.format(key))
 
     return edges
 
@@ -247,7 +251,7 @@ def main(local=False):
     # Create Spark Context
     sc = SparkContext().getOrCreate()
     log4jLogger = sc._jvm.org.apache.log4j
-    LOGGER = log4jLogger.LogManager.getLogger(__name__)
+    log = log4jLogger.LogManager.getLogger(__name__)
 
     # Get list of all files already processed
     edge_bucket = 'edges-to-neo4j'
@@ -259,22 +263,22 @@ def main(local=False):
 
     # Process keys in chunks
     c = 0
-    for chunk in chunks(keys_to_process, 24):
+    for chunk in chunks(keys_to_process, 6):
         # Todo: read with s3a instead and union together
         if "edges_{}".format(c) in edge_files:  # Skip files that already exist
-            LOGGER.info("edges_{} already exists".format(c))
+            log.info("edges_{} already exists".format(c))
             c += 1
             continue
-        rdd = sc.parallelize(chunk, 24)
+        rdd = sc.parallelize(chunk, 6)
         edges = rdd.map(process).cache()
         if local:
-            edges.filter(lambda x: x != "").coalesce(1).saveAsTextFile(
+            edges.filter(lambda x: x != "\n" and x != "").coalesce(1).saveAsTextFile(
                 "{}/{}".format(edge_bucket, "edges_{}".format(c)))
         else:
             edges.filter(lambda x: x != "").coalesce(1).saveAsTextFile(
                 "s3a://{}/{}".format(edge_bucket, "edges_{}".format(c)))
         c += 1
-        LOGGER.info("edges_{} created".format(c))
+        log.info("edges_{} created".format(c))
 
 
 if __name__ == '__main__':

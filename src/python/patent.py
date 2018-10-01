@@ -92,4 +92,4 @@ class Patent(object):
         patent_number = self.patent_number
         for citation in self.citations:
             s.append(patent_number + sep + citation + '\n')
-        return ''.join(s).rstrip('\n')
+        return ''.join(s)
