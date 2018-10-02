@@ -260,10 +260,15 @@ def process(key):
         file_name = download_from_s3(key)
         name, data = decompress(file_name)
         os.remove(file_name)
+    
+    
         chunks = clean_and_split(data, name)
+        data = ''.join(chunks)
+        del chunks
+        gc.collect()
         # Parse Data and output to csv
-        patent_parser = PatentParser(''.join(chunks))
-
+        patent_parser = PatentParser(data)
+        
         log.warn("Parsed with {} patents seen and {} processed".format(patent_parser.totalpatents,
                                                                        len(patent_parser.patents)))
         log.warn("{} patents with citations".format(patent_parser.citationpatents))
@@ -365,19 +370,19 @@ def main(local, partitions, bulk):
         if output_name in edge_files:  # Skip files that already exist
             log.info("{} already exists".format(output_name))
             continue
-        rdd = sc.parallelize(keys_to_process[year], partitions)
+        rdd = sc.parallelize(keys_to_process[year][:10], partitions)
         edges = rdd.map(process)
 
         if local:
             try:
-                edges.filter(lambda x: x != "\n" and x != "").coalesce(1).saveAsTextFile(
+                edges.filter(lambda x: x != "\n" and x != "").saveAsTextFile(
                     "{}/{}".format(edge_bucket, output_name))
             except:
                 shutil.rmtree("{}/{}".format(edge_bucket, output_name))
-                edges.filter(lambda x: x != "\n" and x != "").coalesce(1).saveAsTextFile(
+                edges.filter(lambda x: x != "\n" and x != "").saveAsTextFile(
                     "{}/{}".format(edge_bucket, output_name))
         else:
-            edges.filter(lambda x: x != "\n" and x != "").coalesce(1).saveAsTextFile(
+            edges.filter(lambda x: x != "\n" and x != "").saveAsTextFile(
                 "s3a://{}/{}".format(edge_bucket, output_name))
 
         edges.unpersist()
