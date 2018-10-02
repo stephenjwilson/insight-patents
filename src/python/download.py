@@ -42,6 +42,15 @@ def download(start_year, end_year, storage_location='patent_xml_zipped'):
     except FileExistsError:
         pass
 
+    # Get already downloaded files
+    s3 = boto3.resource('s3')
+    my_bucket = s3.Bucket(BUCKET_NAME)
+    current_keys = []
+    for my_object in my_bucket.objects.all():
+        if ".json" in my_object.key:
+            continue
+        current_keys.append(my_object.key)
+    f = open("downloaded_files.txt",'w')
     # retrieve each week for a particular year
     for year in range(start_year, end_year + 1):
         folder_path = os.path.join(storage_location, str(year))
@@ -54,6 +63,10 @@ def download(start_year, end_year, storage_location='patent_xml_zipped'):
         urls = get_urls(year)
         # Download each zip
         for url in urls:
+            name = re.sub("\D", "", url.split('_')[0])
+            if name in current_keys:
+                continue
+
             local_path = os.path.join(folder_path, url)
             # Get and download zip
             resp = requests.get(BASE_URL.format(year) + url)
@@ -61,13 +74,12 @@ def download(start_year, end_year, storage_location='patent_xml_zipped'):
             f.write(resp.content)
             f.close()
             # Upload to S3
-
-            name = re.sub("\D", "", url.split('_')[0])
             push_to_s3(local_path, year, name)
             log.info("Pushed %s", "{}_{}".format(year, name))
-
+            f.write("{}/{}".format(year, name))
             # Remove file
             os.remove(local_path)
+    f.close()
     return
 
 

@@ -1,7 +1,7 @@
 """
 The main run script of the pipeline. It includes a main function that is used in spark submit.
 """
-
+import gc
 import io
 import logging
 import os
@@ -12,6 +12,8 @@ import botocore
 import psycopg2
 from dotenv import load_dotenv, find_dotenv
 from pyspark import SparkContext
+import click
+from collections import defaultdict
 
 from src.python.parsers import PatentParser
 #from parsers import PatentParser
@@ -162,7 +164,7 @@ def download_from_s3(key, output_name=None, bucket=None):
     return output_name
 
 
-def process(data):
+def process(key):
     """
     Applys an ETL pipeline for patents on a particular key from a S3 bucket
     :param key: This is the key for the S3 Bucket
@@ -172,14 +174,18 @@ def process(data):
     log = log4jLogger.LogManager.getLogger(__name__)
     # LOGGER.setLevel("WARN")
 
-    try:
+    #try:
+    if 1:
         # Load environment variables
         load_dotenv(find_dotenv())
 
         # Download, decompress, and determine format of data TODO: do in memory
-
+        file_name = download_from_s3(key)
+        name, data = decompress(file_name)
+        os.remove(file_name)
+                        
         # Parse Data and output to csv
-        patent_parser = PatentParser(data)
+        patent_parser = PatentParser(data.decode('latin1'))
 
         log.warn("Parsed with {} patents seen and {} processed".format(patent_parser.totalpatents,
                                                                        len(patent_parser.patents)))
@@ -203,9 +209,9 @@ def process(data):
             except psycopg2.IntegrityError:
                 pass
 
-    except Exception as e:
-        log.warn('Failed with exception: {}'.format(e))
-        edges = ''
+    #except Exception as e:
+    #    log.warn('Failed with exception: {}'.format(e))
+    #    edges = ''
     if edges == '':
         log.warn('Not getting edges')
 
@@ -221,13 +227,13 @@ def clean_and_split(data, name):
     # split file as appropriate
     if 'aps' in name:
         split_string = split_strings['aps']
-        chunks = [split_string + x for x in data.decode('utf-8').split(split_string)][1:]
+        chunks = [split_string + x for x in data.decode('latin1').split(split_string)][1:]
     elif 'ipg' in name:
         split_string = split_strings['ipg']
-        chunks = [split_string + x for x in data.decode('utf-8').split(split_string)][1:]
+        chunks = [split_string + x for x in data.decode('latin1').split(split_string)][1:]
     elif 'pg' in name:
         split_string = split_strings['pg']
-        chunks = [split_string + x for x in data.decode('utf-8').split(split_string)][1:]
+        chunks = [split_string + x for x in data.decode('latin1').split(split_string)][1:]
     else:
         chunks = []
     return chunks
@@ -238,8 +244,79 @@ def chunk_list(l, n):
     for i in range(0, len(l), n):
         yield l[i:i + n]
 
+def to_neo4j(csv_edges, table='patents'):
+    """
+    Code and Cyper commands needed to upload the relationship data to neo4j.
+    
+    :param csv_edges:
+    :return:
+    """
+    # Set-Up Patents
+    driver = GraphDatabase.driver(os.getenv("NEO4J_URI"), auth=("neo4j", os.getenv("NEO4J_PASSWORD")))
+    session = driver.session()
+    # Add Index and Constraints
+    # query = '''CREATE INDEX ON :Patent(patent_number)'''
+    # session.run(query)
+    query = '''CREATE CONSTRAINT ON (p:Patent) ASSERT p.patent_number IS UNIQUE'''
+    session.run(query)
+    session.sync()
 
-def main(local=True, num_of_patents_to_process=10000, partitions=2):
+    # Get all relevant new patent numbers
+    new_numbers = ["'{}'".format(x.split(',')[0]) for x in csv_edges.split('\n')]
+
+    # TODO: get Nodes from postgres to csv
+    HOST = os.getenv("POSTGRES_HOST")
+    USER = os.getenv("POSTGRES_USER")
+    PASS = os.getenv("POSTGRES_PASSWORD")
+    conn = psycopg2.connect(host=HOST, dbname="patent_data", user=USER, password=PASS)
+
+    # Upload data
+    cur = conn.cursor()
+    query = "Select patent_number, title From {} where patent_number = ANY ({})".format(table,','.join(new_numbers ))
+    with open('/home/ubuntu/tmp_nodes.txt', 'w') as f:
+        cur.copy_expert("copy ({}) to stdout with csv header".format(query), f)
+            
+    # load node data
+    query = '''
+    LOAD CSV WITH HEADERS FROM "https://s3.amazonaws.com/tmpbucketpatents/%s"
+    AS csvLine
+    MERGE (p: Patent {patent_number: csvLine.patent_number })
+    ON CREATE SET p = {patent_number: csvLine.patent_number, title: csvLine.title, owner: csvLine.owner, 
+    abstract: csvLine.abstract}
+    ON MATCH SET p += {patent_number: csvLine.patent_number, title: csvLine.title, owner: csvLine.owner, 
+    abstract: csvLine.abstract}''' % csv_nodes
+    session.run(query)
+    
+    # Set up Patent Relationships
+    #session.sync()
+    f=open('/home/ubuntu/tmp_edges.txt','w')
+    f.write(csv_edges)
+    f.close()
+    
+    query = '''
+    LOAD CSV WITH HEADERS FROM "file:///home/ubuntu/tmp_edges.txt"
+    AS csvLine
+    MERGE (f: Patent {patent_number: csvLine.patent_number})
+    MERGE (t: Patent {patent_number: csvLine.citation})
+    MERGE (f)-[:CITES]->(t)
+    '''
+    session.run(query)
+    session.sync()
+        
+def nonbulk_process():
+    keys = open("downloaded_files.txt").readlines()
+    for key in keys:
+        edges = process(key.strip())
+        # Push edges to Neo4j
+        to_neo4j(edges)
+
+@click.command()
+@click.option('--local', default=False, help='Saves files locally if True, otherwise on S3 ')
+@click.option('--year_split', default=10,
+              help='The number of patents to send to spark to process in a batch')
+@click.option('--partitions', default=10, help='The number of partitions to split the patents into for each spark job')
+@click.option('--bulk', default=True, help='Processes the files based on all possible files on the S3 if True. If False, the pipeline will use the keys in the local file: downloaded_files.txt')
+def main(local, year_split, partitions, bulk):
     """
     Main Function that downloads, decompresses, and parses the USTPO XML data before dumping it into a
     PostgreSQL and a Neo4j database.
@@ -248,16 +325,20 @@ def main(local=True, num_of_patents_to_process=10000, partitions=2):
 
     # Ensure that the postgres table is there
     ensure_postgres()
-
+    # Don't create a spark job if updating a few files
+    if not bulk:
+        nonbulk_process()
+        return
     # Get list of keys to process
     s3 = boto3.resource('s3')
     my_bucket = s3.Bucket(BUCKET_NAME)
-    keys_to_process = []
+    keys_to_process = defaultdict(list)
     for my_object in my_bucket.objects.all():
         if ".json" in my_object.key:
             continue
-        keys_to_process.append(my_object.key)
-    # process(keys_to_process[0])
+        year, date = my_object.key.split('/')
+        keys_to_process[year].append(my_object.key)
+    
 
     # Create Spark Context
     sc = SparkContext().getOrCreate()
@@ -274,42 +355,29 @@ def main(local=True, num_of_patents_to_process=10000, partitions=2):
 
     # Process keys in chunks
     c = 0
-    all_chunks = []
-    for key in keys_to_process:
-        # Todo: read with s3a instead and union together
-        if "edges_{}".format(c) in edge_files:  # Skip files that already exist
-            log.info("edges_{} already exists".format(c))
-            c += 1
-            continue
-        # get file
-        file_name = download_from_s3(key)
-        name, data = decompress(file_name)
-        # os.remove(file_name)
-
-        chunks = clean_and_split(data, name)
-        if not chunks:
-            log.info("key {} failed on split".format(key))
-            continue
-
-        all_chunks += chunks
-        if len(all_chunks) > num_of_patents_to_process:
-            pieces = [''.join(x) for x in chunk_list(all_chunks, int(len(all_chunks)/partitions))]
-            # edges = process(pieces[0])
-            # embed()
-            # exit()
-            # Distribute data
-            rdd = sc.parallelize(pieces, partitions)
-            edges = rdd.map(process).collect()
-            if local:
-                edges.filter(lambda x: x != "\n" and x != "").coalesce(1).saveAsTextFile(
-                    "{}/{}".format(edge_bucket, "edges_{}".format(c)))
-            else:
-                edges.filter(lambda x: x != "\n" and x != "").coalesce(1).saveAsTextFile(
-                    "s3a://{}/{}".format(edge_bucket, "edges_{}".format(c)))
-            c += 1
-            log.info("edges_{} created".format(c))
-            exit()
-            all_chunks = []
+    
+    for year in keys_to_process:
+        keys = []
+        output_name = year
+        if output_name in edge_files:  # Skip files that already exist
+                log.info("{} already exists".format(output_name))
+                continue
+        
+        # Distribute data
+        rdd = sc.parallelize(keys_to_process[year], partitions)
+        edges = rdd.map(process)
+        
+        if local:
+            edges.filter(lambda x: x != "\n" and x != "").coalesce(1).saveAsTextFile("{}/{}".format(edge_bucket, output_name))
+        else:
+            try:
+                edges.filter(lambda x: x != "\n" and x != "").coalesce(1).saveAsTextFile("s3a://{}/{}".format(edge_bucket, output_name))
+            except:
+                pass
+        edges.unpersist()
+        rdd.unpersist()
+        log.info("{} created".format(output_name))
+        gc.collect()
 
 
 if __name__ == '__main__':

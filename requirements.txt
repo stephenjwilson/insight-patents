@@ -7,3 +7,4 @@ python-dotenv
 IPython
 neo4j-driver==1.6.2
 lxml
+click
