@@ -6,11 +6,13 @@ import datetime
 import re
 from io import BytesIO
 from itertools import chain
+
 from lxml import etree
 from pyspark import SparkContext
-from IPython import embed
 
 from src.python.patent import Patent
+
+
 #from patent import Patent
 
 
@@ -45,15 +47,14 @@ class PatentParser(object):
         self.citationpatents = 0
         self.split_strings = {
             'PATN': self.parse_v1,
-            'us-patent-grant': self.parse_v3,
-            'PATDOC': self.parse_v3
+            'us-patent': self.parse_v3,
+            'PATDOC': self.parse_v2
         }
         # Use the appropriate parser
 
         for key in self.split_strings:
             if key in self.data[:10]:
-                print(self.split_strings[key])
-                self.split_strings[key]()
+                self.split_strings[key]()  # Parse using the appropriate parser
 
     @staticmethod
     def get_child_text(element, tag, default=''):
@@ -421,7 +422,7 @@ class PatentParser(object):
                         kind = self.get_child_text(docid, 'kind')
 
                         cleaned = self.clean_citation(pnum)
-                        if cleaned is not None:
+                        if cleaned is None:
                             pass
                         elif cleaned.isdigit():
                             cites.append(cleaned)

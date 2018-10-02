@@ -167,82 +167,6 @@ def download_from_s3(key, output_name=None, bucket=None):
     return output_name
 
 
-def process(key):
-    """
-    Applys an ETL pipeline for patents on a particular key from a S3 bucket
-    :param key: This is the key for the S3 Bucket
-    """
-    sc = SparkContext.getOrCreate()
-    log4jLogger = sc._jvm.org.apache.log4j
-    log = log4jLogger.LogManager.getLogger(__name__)
-    # LOGGER.setLevel("WARN")
-
-    # try:
-    if 1:
-        # Load environment variables
-        load_dotenv(find_dotenv())
-
-        # Download, decompress, and determine format of data
-        file_name = download_from_s3(key)
-        name, data = decompress(file_name)
-        os.remove(file_name)
-        chunks = clean_and_split(data, name)
-        # Parse Data and output to csv
-        patent_parser = PatentParser(''.join(chunks))
-
-        log.warn("Parsed with {} patents seen and {} processed".format(patent_parser.totalpatents,
-                                                                       len(patent_parser.patents)))
-        log.warn("{} patents with citations".format(patent_parser.citationpatents))
-        log.warn("{} citations\n".format(sum([len(x.citations) for x in patent_parser.patents])))
-
-        nodes, edges = to_csv(patent_parser.patents)
-
-        # # send nodes to postgres
-        # try:
-        #     to_postgres(nodes)
-        # except psycopg2.IntegrityError:
-        #     pass
-        # log.warn("init postgres")
-        # # send out malformed data if needed
-        # if sum([x.flagged_for_review for x in patent_parser.patents]) > 0:
-        #     nodes, _ = to_csv(patent_parser.patents, review_only=True)
-        #     # send nodes to postgres
-        #     try:
-        #         to_postgres(nodes, table='patents_to_review')
-        #     except psycopg2.IntegrityError:
-        #         pass
-        # log.warn("next postgres")
-
-    # except Exception as e:
-    #    log.warn('Failed with exception: {}'.format(e))
-    #    edges = ''
-    if edges == '':
-        log.warn('Not getting edges')
-
-    return edges
-
-
-def clean_and_split(data, name):
-    split_strings = {
-        'aps': 'PATN',
-        'ipg': '<us-patent-grant',
-        'pg': '<PATDOC'
-    }
-    # split file as appropriate
-    if 'aps' in name:
-        split_string = split_strings['aps']
-        chunks = [split_string + x for x in data.split(split_string)][1:]
-    elif 'ipg' in name:
-        split_string = split_strings['ipg']
-        chunks = [split_string + x for x in data.split(split_string)][1:]
-    elif 'pg' in name:
-        split_string = split_strings['pg']
-        chunks = [split_string + x for x in data.split(split_string)][1:]
-    else:
-        chunks = []
-    return chunks
-
-
 def chunk_list(l, n):
     """Yield successive n-sized chunks from l."""
     for i in range(0, len(l), n):
@@ -252,7 +176,7 @@ def chunk_list(l, n):
 def to_neo4j(csv_edges, table='patents'):
     """
     Code and Cyper commands needed to upload the relationship data to neo4j.
-    
+
     :param csv_edges:
     :return:
     """
@@ -317,14 +241,88 @@ def nonbulk_process():
         to_neo4j(edges)
 
 
+def process(key):
+    """
+    Applys an ETL pipeline for patents on a particular key from a S3 bucket
+    :param key: This is the key for the S3 Bucket
+    """
+    sc = SparkContext.getOrCreate()
+    log4jLogger = sc._jvm.org.apache.log4j
+    log = log4jLogger.LogManager.getLogger(__name__)
+    # LOGGER.setLevel("WARN")
+
+    # try:
+    if 1:
+        # Load environment variables
+        load_dotenv(find_dotenv())
+
+        # Download, decompress, and determine format of data
+        file_name = download_from_s3(key)
+        name, data = decompress(file_name)
+        os.remove(file_name)
+        chunks = clean_and_split(data, name)
+        # Parse Data and output to csv
+        patent_parser = PatentParser(''.join(chunks))
+
+        log.warn("Parsed with {} patents seen and {} processed".format(patent_parser.totalpatents,
+                                                                       len(patent_parser.patents)))
+        log.warn("{} patents with citations".format(patent_parser.citationpatents))
+        log.warn("{} citations\n".format(sum([len(x.citations) for x in patent_parser.patents])))
+
+        nodes, edges = to_csv(patent_parser.patents)
+
+        # send nodes to postgres
+        try:
+            to_postgres(nodes)
+        except psycopg2.IntegrityError:
+            pass
+        log.warn("init postgres")
+        # send out malformed data if needed
+        if sum([x.flagged_for_review for x in patent_parser.patents]) > 0:
+            nodes, _ = to_csv(patent_parser.patents, review_only=True)
+            # send nodes to postgres
+            try:
+                to_postgres(nodes, table='patents_to_review')
+            except psycopg2.IntegrityError:
+                pass
+        log.warn("next postgres")
+
+    # except Exception as e:
+    #    log.warn('Failed with exception: {}'.format(e))
+    #    edges = ''
+    if edges == '':
+        log.warn('Not getting edges')
+
+    return edges
+
+
+def clean_and_split(data, name):
+    split_strings = {
+        'aps': 'PATN',
+        'ipg': '<us-patent-grant',
+        'pg': '<PATDOC'
+    }
+    # split file as appropriate
+    if 'aps' in name:
+        split_string = split_strings['aps']
+        chunks = [split_string + x for x in data.split(split_string)][1:]
+    elif 'ipg' in name:
+        split_string = split_strings['ipg']
+        chunks = [split_string + x for x in data.split(split_string)][1:]
+    elif 'pg' in name:
+        split_string = split_strings['pg']
+        chunks = [split_string + x for x in data.split(split_string)][1:]
+    else:
+        chunks = []
+    return chunks
+
+
 @click.command()
 @click.option('--local', default=False, help='Saves files locally if True, otherwise on S3 ')
-@click.option('--year_split', default=10,
-              help='The number of patents to send to spark to process in a batch')
 @click.option('--partitions', default=10, help='The number of partitions to split the patents into for each spark job')
 @click.option('--bulk', default=True,
               help='Processes the files based on all possible files on the S3 if True. If False, the pipeline will use the keys in the local file: downloaded_files.txt')
-def main(local, year_split, partitions, bulk):
+def main(local, partitions, bulk):
     """
     Main Function that downloads, decompresses, and parses the USTPO XML data before dumping it into a
     PostgreSQL and a Neo4j database.
@@ -360,9 +358,6 @@ def main(local, year_split, partitions, bulk):
     for my_object in my_bucket.objects.all():
         edge_files.append(my_object.key.split('/')[0])
 
-    # Process keys in chunks
-    c = 0
-
     for year in keys_to_process:
 
         # Distribute data
@@ -371,7 +366,7 @@ def main(local, year_split, partitions, bulk):
             log.info("{} already exists".format(output_name))
             continue
         rdd = sc.parallelize(keys_to_process[year], partitions)
-        edges = rdd.map(process).cache()
+        edges = rdd.map(process)
 
         if local:
             try:
