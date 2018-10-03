@@ -176,7 +176,8 @@ def process(key):
     # LOGGER.setLevel("WARN")
 
     log.info("Starting {}".format(key))
-    try:
+    #try:
+    if 1:
         # Load environment variables
         load_dotenv(find_dotenv())
 
@@ -213,9 +214,9 @@ def process(key):
         # Remove files
         os.remove(file_name)
         os.remove(decompress_name)
-    except Exception as e:
-        log.warn('Failed on {}, with exception: {}'.format(key, e))
-        edges = ''
+    #except Exception as e:
+    #    log.warn('Failed on {}, with exception: {}'.format(key, e))
+    #    edges = ''
     if edges == '':
         log.warn('Not getting edges for {}!'.format(key))
 
@@ -270,12 +271,12 @@ def main(local=False):
             c += 1
             continue
         rdd = sc.parallelize(chunk, 6)
-        edges = rdd.map(process).cache()
+        edges = rdd.map(process)
         if local:
-            edges.filter(lambda x: x != "\n" and x != "").coalesce(1).saveAsTextFile(
+            edges.filter(lambda x: x != "\n" and x != "").saveAsTextFile(
                 "{}/{}".format(edge_bucket, "edges_{}".format(c)))
         else:
-            edges.filter(lambda x: x != "").coalesce(1).saveAsTextFile(
+            edges.filter(lambda x: x != "").saveAsTextFile(
                 "s3a://{}/{}".format(edge_bucket, "edges_{}".format(c)))
         c += 1
         log.info("edges_{} created".format(c))
