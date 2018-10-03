@@ -12,9 +12,12 @@ import botocore
 import psycopg2
 from dotenv import load_dotenv, find_dotenv
 from pyspark import SparkContext
+import click
+from neo4j.v1 import GraphDatabase
 
 from src.python.parsers import PatentParser
-#from parsers import PatentParser
+
+# from parsers import PatentParser
 
 BUCKET_NAME = 'patent-xml-zipped'
 
@@ -23,7 +26,6 @@ def to_csv(list_of_patents, sep=',', review_only=False):
     """
     Takes a list_of_patent_dictionaries and outputs a csv that can be uploaded into postgres
     :param list_of_patents: A list of Patent objects
-    :param output: The file name used to output the files
     :param sep: The separator for the csv file
     :param review_only: Dictates if the function should only return review articles
     :return: nodes string, edges string
@@ -97,7 +99,7 @@ def ensure_postgres():
 def to_postgres(data, table='patents'):
     """
     Do a bulk upload of a csv file to a PostgreSQL database.
-    :param csv_file: The name of the csv file to upload
+    :param data: The string to send
     :param table: The name of the table to commit to
     """
 
@@ -123,7 +125,7 @@ def to_postgres(data, table='patents'):
 
 def decompress(file_name):
     """
-    Decompresses the file.  TODO: consider extracting to memory instead of disk
+    Decompresses the file.
     :return: Returns the name of the decompressed file
     """
     zip_ref = zipfile.ZipFile(file_name, 'r')
@@ -141,6 +143,9 @@ def download_from_s3(key, output_name=None, bucket=None):
     :param bucket: The name of the S3 bucket. Can be retrieved from the variable BUCKET_NAME
     :return:
     """
+    sc = SparkContext.getOrCreate()
+    log4jLogger = sc._jvm.org.apache.log4j
+    log = log4jLogger.LogManager.getLogger(__name__)
     if bucket is None:
         bucket = BUCKET_NAME
     if output_name is None:
@@ -158,7 +163,7 @@ def download_from_s3(key, output_name=None, bucket=None):
         my_bucket.download_file(key, output_name)
     except botocore.exceptions.ClientError as e:
         if e.response['Error']['Code'] == "404":
-            logging.log("{} does not exist.".format(key))
+            log.info("{} does not exist. Error: {}".format(key, e))
         else:
             raise
     return output_name
@@ -218,13 +223,91 @@ def process(key):
     return edges
 
 
+def to_neo4j(csv_edges, table='patents'):
+    """
+    Code and Cyper commands needed to upload the relationship data to neo4j.
+    :param csv_edges: The string that contains the edges
+    :param table: The string that dictates which table will be used to get node information
+    :return:
+    """
+    # Set-Up Patents
+    driver = GraphDatabase.driver(os.getenv("NEO4J_URI"), auth=("neo4j", os.getenv("NEO4J_PASSWORD")))
+    session = driver.session()
+    # Add Index and Constraints
+    # query = '''CREATE INDEX ON :Patent(patent_number)'''
+    # session.run(query)
+    query = '''CREATE CONSTRAINT ON (p:Patent) ASSERT p.patent_number IS UNIQUE'''
+    session.run(query)
+    session.sync()
+
+    # Get all relevant new patent numbers
+    new_numbers = ["'{}'".format(x.split(',')[0]) for x in csv_edges.split('\n')]
+
+    # Get Nodes from postgres to csv
+    HOST = os.getenv("POSTGRES_HOST")
+    USER = os.getenv("POSTGRES_USER")
+    PASS = os.getenv("POSTGRES_PASSWORD")
+    conn = psycopg2.connect(host=HOST, dbname="patent_data", user=USER, password=PASS)
+
+    # Upload data
+    cur = conn.cursor()
+    query = "Select patent_number, title From {} where patent_number = ANY ({})".format(table, ','.join(new_numbers))
+    with open('/home/ubuntu/tmp_nodes.txt', 'w') as f:
+        cur.copy_expert("copy ({}) to stdout with csv header".format(query), f)
+
+    # load node data
+    query = '''
+    LOAD CSV WITH HEADERS FROM "https://s3.amazonaws.com/tmpbucketpatents/%s"
+    AS csvLine
+    MERGE (p: Patent {patent_number: csvLine.patent_number })
+    ON CREATE SET p = {patent_number: csvLine.patent_number, title: csvLine.title, owner: csvLine.owner, 
+    abstract: csvLine.abstract}
+    ON MATCH SET p += {patent_number: csvLine.patent_number, title: csvLine.title, owner: csvLine.owner, 
+    abstract: csvLine.abstract}'''
+    session.run(query)
+
+    # Set up Patent Relationships
+    # session.sync()
+    f = open('/home/ubuntu/tmp_edges.txt', 'w')
+    f.write(csv_edges)
+    f.close()
+
+    query = '''
+    LOAD CSV WITH HEADERS FROM "file:///home/ubuntu/tmp_edges.txt"
+    AS csvLine
+    MERGE (f: Patent {patent_number: csvLine.patent_number})
+    MERGE (t: Patent {patent_number: csvLine.citation})
+    MERGE (f)-[:CITES]->(t)
+    '''
+    session.run(query)
+    session.sync()
+    os.remove('/home/ubuntu/tmp_edges.txt')
+
+
+def nonbulk_process():
+    """
+    Processes files in a processive non-spark manner.
+    :return:
+    """
+    keys = open("downloaded_files.txt").readlines()
+    for key in keys:
+        edges = process(key.strip())
+        # Push edges to Neo4j
+        to_neo4j(edges)
+
+
 def chunks(l, n):
     """Yield successive n-sized chunks from l."""
     for i in range(0, len(l), n):
         yield l[i:i + n]
 
 
-def main(local=False):
+@click.command()
+@click.option('--local', default=False, help='Saves files locally if True, otherwise on S3 ')
+@click.option('--bulk', default=True,
+              help='''Processes the files based on all possible files on the S3 if True. 
+              If False, the pipeline will use the keys in the local file: downloaded_files.txt''')
+def main(local, bulk):
     """
     Main Function that downloads, decompresses, and parses the USTPO XML data before dumping it into a
     PostgreSQL and a Neo4j database.
@@ -234,12 +317,20 @@ def main(local=False):
     # Ensure that the postgres table is there
     ensure_postgres()
 
+    # Don't create a spark job if updating a few files
+    if not bulk:
+        nonbulk_process()
+        return
+
     # Get list of keys to process
     s3 = boto3.resource('s3')
     my_bucket = s3.Bucket(BUCKET_NAME)
     keys_to_process = []
     for my_object in my_bucket.objects.all():
         if ".json" in my_object.key:
+            continue
+        # 2001 files are available in two formats. Don't use the SGML format
+        if my_object.key.split('/')[1][:2] == '01':
             continue
         keys_to_process.append(my_object.key)
 
