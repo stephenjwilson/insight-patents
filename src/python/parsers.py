@@ -6,13 +6,11 @@ import datetime
 import re
 from io import BytesIO
 from itertools import chain
-
+from IPython import embed
 from lxml import etree
 from pyspark import SparkContext
 
 from src.python.patent import Patent
-
-
 #from patent import Patent
 
 
@@ -367,7 +365,10 @@ class PatentParser(object):
             self.patents.append(patent)
             return True
 
-        lines = [line for line in open(self.file_name).readlines() if self.acceptable(line)]  # TODO: maybe optimize
+        lines = []
+        for line in open(self.file_name).readlines():
+            if self.acceptable(line):
+                lines.append(line)
         lines = ['<root>\n'] + lines + ['</root>\n']
         context = etree.iterparse(BytesIO(''.join(lines).encode('utf-8')), tag='PATDOC', events=['end'],
                                   recover=True)
@@ -394,6 +395,7 @@ class PatentParser(object):
             cleaned = self.clean_citation(patnum)
             if cleaned is None:
                 patent.flagged_for_review = True  # Malformed citation
+                print("FLAGGED")
                 patent.patent_number = patnum
             elif cleaned.isdigit():
                 patent.patent_number = cleaned
@@ -436,13 +438,12 @@ class PatentParser(object):
                 for cite in refs.findall(prefix + 'citation'):
                     pcite = cite.find('patcit')
                     if pcite is not None:
-
                         docid = pcite.find('document-id')
                         pnum = self.get_child_text(docid, 'doc-number')
                         kind = self.get_child_text(docid, 'kind')
-
+                        # Make sure the citation conforms with expected form
                         cleaned = self.clean_citation(pnum)
-                        if cleaned is not None:
+                        if cleaned is None:
                             pass
                         elif cleaned.isdigit():
                             cites.append(cleaned)
@@ -467,7 +468,11 @@ class PatentParser(object):
 
             self.patents.append(patent)
 
-        lines = [line for line in open(self.file_name).readlines() if self.acceptable(line)]  # TODO: maybe optimize
+        lines = []
+        for line in open(self.file_name).readlines():
+            if self.acceptable(line):
+                lines.append(line)
+
         lines = ['<root>\n'] + lines + ['</root>\n']
         context = etree.iterparse(BytesIO(''.join(lines).encode('utf-8')), tag='us-patent-grant', events=['end'],
                                   recover=True)

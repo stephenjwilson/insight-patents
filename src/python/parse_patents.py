@@ -6,7 +6,7 @@ import io
 import logging
 import os
 import zipfile
-
+from IPython import embed
 import boto3
 import botocore
 import psycopg2
@@ -14,7 +14,6 @@ from dotenv import load_dotenv, find_dotenv
 from pyspark import SparkContext
 
 from src.python.parsers import PatentParser
-
 #from parsers import PatentParser
 
 BUCKET_NAME = 'patent-xml-zipped'
@@ -173,50 +172,46 @@ def process(key):
     sc = SparkContext.getOrCreate()
     log4jLogger = sc._jvm.org.apache.log4j
     log = log4jLogger.LogManager.getLogger(__name__)
-    # LOGGER.setLevel("WARN")
 
     log.info("Starting {}".format(key))
-    #try:
-    if 1:
-        # Load environment variables
-        load_dotenv(find_dotenv())
 
-        # Download, decompress, and determine format of data TODO: do in memory
-        file_name = download_from_s3(key)
+    # Load environment variables
+    load_dotenv(find_dotenv())
 
-        decompress_name = decompress(file_name)
+    # Download, decompress, and determine format of data.
+    file_name = download_from_s3(key)
+    # Decompresses to file. Doing in memory causes too large a footprint
+    decompress_name = decompress(file_name)
 
-        # Parse Data and output to csv
-        patent_parser = PatentParser(decompress_name)
+    # Parse Data and output to csv
+    patent_parser = PatentParser(decompress_name)
 
-        log.warn("Parsed {}, with {} patents seen and {} processed".format(key, patent_parser.totalpatents,
-                                                                           len(patent_parser.patents)))
-        log.warn("{} patents with citations".format(patent_parser.citationpatents))
-        log.warn("{} citations\n".format(sum([len(x.citations) for x in patent_parser.patents])))
+    log.warn("Parsed {}, with {} patents seen and {} processed".format(key, patent_parser.totalpatents,
+                                                                       len(patent_parser.patents)))
+    log.warn("{} patents with citations".format(patent_parser.citationpatents))
+    log.warn("{} citations\n".format(sum([len(x.citations) for x in patent_parser.patents])))
 
-        nodes, edges = to_csv(patent_parser.patents)
+    nodes, edges = to_csv(patent_parser.patents)
 
+    # send nodes to postgres
+    try:
+        to_postgres(nodes)
+    except psycopg2.IntegrityError:
+        pass
+
+    # send out malformed data if needed
+    if sum([x.flagged_for_review for x in patent_parser.patents]) > 0:
+        nodes, _ = to_csv(patent_parser.patents, review_only=True)
         # send nodes to postgres
         try:
-            to_postgres(nodes)
+            to_postgres(nodes, table='patents_to_review')
         except psycopg2.IntegrityError:
             pass
 
-        # send out malformed data if needed
-        if sum([x.flagged_for_review for x in patent_parser.patents]) > 0:
-            nodes, _ = to_csv(patent_parser.patents, review_only=True)
-            # send nodes to postgres
-            try:
-                to_postgres(nodes, table='patents_to_review')
-            except psycopg2.IntegrityError:
-                pass
+    # Remove files
+    os.remove(file_name)
+    os.remove(decompress_name)
 
-        # Remove files
-        os.remove(file_name)
-        os.remove(decompress_name)
-    #except Exception as e:
-    #    log.warn('Failed on {}, with exception: {}'.format(key, e))
-    #    edges = ''
     if edges == '':
         log.warn('Not getting edges for {}!'.format(key))
 
@@ -247,7 +242,6 @@ def main(local=False):
         if ".json" in my_object.key:
             continue
         keys_to_process.append(my_object.key)
-    # process(keys_to_process[0])
 
     # Create Spark Context
     sc = SparkContext().getOrCreate()
@@ -265,14 +259,13 @@ def main(local=False):
     # Process keys in chunks
     c = 0
     for chunk in chunks(keys_to_process, 6):
-        # Todo: read with s3a instead and union together
         if "edges_{}".format(c) in edge_files:  # Skip files that already exist
             log.info("edges_{} already exists".format(c))
             c += 1
             continue
         rdd = sc.parallelize(chunk, 6)
         edges = rdd.map(process)
-        if local:
+        if local:  # Option to test locally
             edges.filter(lambda x: x != "\n" and x != "").saveAsTextFile(
                 "{}/{}".format(edge_bucket, "edges_{}".format(c)))
         else:
