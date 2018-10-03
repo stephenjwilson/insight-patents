@@ -22,3 +22,5 @@ pip3 install -r ~/insight-patents/requirements.txt
 
 echo -e 'export PYTHONPATH=${PYTHONPATH}:/home/ubuntu/insight-patents' | cat >> ~/.profile
 echo -e 'export PYSPARK_PYTHON=python3' | cat >> ~/.profile
+cd ~/insight-patents/
+python3 setup.py bdist_egg
