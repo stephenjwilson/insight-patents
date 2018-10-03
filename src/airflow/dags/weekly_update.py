@@ -11,7 +11,7 @@ airflow_args = {
 }
 
 dag = DAG('airflow_weekly', default_args=airflow_args, schedule_interval='@weekly')
-now = datetime.datetime.now()
+now = datetime.now()
 
 download_data = BashOperator(task_id='download_data',
                              bash_command='python3 download.py {}'.format(now.year),
