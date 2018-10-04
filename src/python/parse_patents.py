@@ -168,7 +168,6 @@ def download_from_s3(key, output_name=None, bucket=None):
             raise
     return output_name
 
-
 def process(key):
     """
     Applys an ETL pipeline for patents on a particular key from a S3 bucket

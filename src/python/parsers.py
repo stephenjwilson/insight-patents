@@ -365,15 +365,27 @@ class PatentParser(object):
             self.patents.append(patent)
             return True
 
-        lines = []
-        for line in open(self.file_name).readlines():
-            if self.acceptable(line):
-                lines.append(line)
-        lines = ['<root>\n'] + lines + ['</root>\n']
-        context = etree.iterparse(BytesIO(''.join(lines).encode('utf-8')), tag='PATDOC', events=['end'],
-                                  recover=True)
-        for (_, elem) in context:
-            parse(elem)
+        def handle_patent(lines):
+            lines = ['<root>\n'] + lines + ['</root>\n']
+            context = etree.iterparse(BytesIO(''.join(lines).encode('utf-8')), tag='PATDOC', events=['end'],
+                                      recover=True)
+            for (_, elem) in context:
+                parse(elem)
+
+        # Do not load the whole file at once as they can be 1GB or more
+        with open(self.file_name, errors='ignore') as f:
+            lines = []
+            for line in f:
+                if line.startswith('<?xml'):
+                    handle_patent(lines)
+
+                    lines = []
+                elif not self.acceptable(line):
+                    pass
+                else:
+                    lines.append(line)
+            else:
+                handle_patent(lines)
 
     def parse_v3(self):
         """
@@ -468,13 +480,24 @@ class PatentParser(object):
 
             self.patents.append(patent)
 
-        lines = []
-        for line in open(self.file_name).readlines():
-            if self.acceptable(line):
-                lines.append(line)
+        def handle_patent(lines):
+            lines = ['<root>\n'] + lines + ['</root>\n']
+            context = etree.iterparse(BytesIO(''.join(lines).encode('utf-8')), tag='us-patent-grant', events=['end'],
+                                      recover=True)
+            for (_, elem) in context:
+                parse(elem)
 
-        lines = ['<root>\n'] + lines + ['</root>\n']
-        context = etree.iterparse(BytesIO(''.join(lines).encode('utf-8')), tag='us-patent-grant', events=['end'],
-                                  recover=True)
-        for (_, elem) in context:
-            parse(elem)
+        # Do not load the whole file at once as they can be 1GB or more
+        with open(self.file_name, errors='ignore') as f:
+            lines = []
+            for line in f:
+                if line.startswith('<?xml'):
+                    handle_patent(lines)
+
+                    lines = []
+                elif not self.acceptable(line):
+                    pass
+                else:
+                    lines.append(line)
+            else:
+                handle_patent(lines)
