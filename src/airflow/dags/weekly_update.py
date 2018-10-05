@@ -15,11 +15,11 @@ dag = DAG('airflow_weekly', default_args=airflow_args, schedule_interval='@weekl
 now = datetime.now()
 
 download_data = BashOperator(task_id='download_data',
-                             bash_command='python3 /home/ubuntu/insight-patents/src/python/download.py {}'.format(
+                             bash_command='python3 /home/ubuntu/insight-patents/src/python/download.py {0} {0}'.format(
                                  now.year),
                              dag=dag)
 
 process_data = BashOperator(task_id='process_data',
-                            bash_command='python3 /home/ubuntu/insight-patents/src/python/parse_patents.py --bulk=false',
+                            bash_command=' PYTHONPATH=dist/insight_patents-0.0.0-py3.6.egg python3 /home/ubuntu/insight-patents/src/python/parse_patents.py --bulk=false',
                             dag=dag)  # neo4j specific upload
 process_data.set_upstream(download_data)

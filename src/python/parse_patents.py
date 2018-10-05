@@ -240,7 +240,7 @@ def to_neo4j(csv_edges, table='patents'):
     session.sync()
 
     # Get all relevant new patent numbers
-    new_numbers = ["'{}'".format(x.split(',')[0]) for x in csv_edges.split('\n')]
+    new_numbers = set(["'{}'".format(x.split(',')[0]) for x in csv_edges.split('\n') if x != ''])
 
     # Get Nodes from postgres to csv
     HOST = os.getenv("POSTGRES_HOST")
@@ -250,13 +250,15 @@ def to_neo4j(csv_edges, table='patents'):
 
     # Upload data
     cur = conn.cursor()
-    query = "Select patent_number, title From {} where patent_number = ANY ({})".format(table, ','.join(new_numbers))
+    query = "Select patent_number, title, owner, abstract From %s where patent_number in (%s)" % (
+    table, ', '.join(new_numbers))
     with open('/home/ubuntu/tmp_nodes.txt', 'w') as f:
+        # with open('tmp_nodes.txt', 'w') as f:
         cur.copy_expert("copy ({}) to stdout with csv header".format(query), f)
 
     # load node data
     query = '''
-    LOAD CSV WITH HEADERS FROM "https://s3.amazonaws.com/tmpbucketpatents/%s"
+    LOAD CSV WITH HEADERS FROM "file:///home/ubunutu/tmp_nodes.txt"
     AS csvLine
     MERGE (p: Patent {patent_number: csvLine.patent_number })
     ON CREATE SET p = {patent_number: csvLine.patent_number, title: csvLine.title, owner: csvLine.owner, 
@@ -280,6 +282,7 @@ def to_neo4j(csv_edges, table='patents'):
     '''
     session.run(query)
     session.sync()
+    os.remove('/home/ubuntu/tmp_nodes.txt')
     os.remove('/home/ubuntu/tmp_edges.txt')
 
 
@@ -289,7 +292,9 @@ def nonbulk_process():
     :return:
     """
     keys = open("downloaded_files.txt").readlines()
+    print('KEYS! {}'.format(keys))
     for key in keys:
+        print('processing {}'.format(key))
         edges = process(key.strip())
         # Push edges to Neo4j
         to_neo4j(edges)
@@ -303,7 +308,7 @@ def chunks(l, n):
 
 @click.command()
 @click.option('--local', default=False, help='Saves files locally if True, otherwise on S3 ')
-@click.option('--bulk', default=True,
+@click.option('--bulk', default=True, type=bool,
               help='''Processes the files based on all possible files on the S3 if True. 
               If False, the pipeline will use the keys in the local file: downloaded_files.txt''')
 def main(local, bulk):
@@ -317,6 +322,7 @@ def main(local, bulk):
     ensure_postgres()
 
     # Don't create a spark job if updating a few files
+
     if not bulk:
         nonbulk_process()
         return

@@ -28,12 +28,13 @@ def get_urls(year):
     return urls
 
 
-def download(start_year, end_year, storage_location='patent_xml_zipped'):
+def download(start_year, end_year, storage_location='patent_xml_zipped', bucket='patent-xml-zipped'):
     """
     Locally downloads the patent data
     :param start_year: the first year that will be retrieved
     :param end_year: the last year that will be retrieved
     :param storage_location: the folder where everything should be stored
+    :param bucket: the S3 Bucket
     :return:
     """
     # Make the storage folder if needed
@@ -42,7 +43,17 @@ def download(start_year, end_year, storage_location='patent_xml_zipped'):
     except FileExistsError:
         pass
 
-    # retrieve each week for a particular year
+    # Get already downloaded files
+    s3 = boto3.resource('s3')
+    my_bucket = s3.Bucket(bucket)
+    current_keys = []
+    for my_object in my_bucket.objects.all():
+        if ".json" in my_object.key:
+            continue
+        current_keys.append(my_object.key)
+    down_f = open("downloaded_files.txt", 'w')
+
+    # retrieve each week for a particular year that hasn't been downloaded
     for year in range(start_year, end_year + 1):
         folder_path = os.path.join(storage_location, str(year))
         # Make folder for year
@@ -54,6 +65,11 @@ def download(start_year, end_year, storage_location='patent_xml_zipped'):
         urls = get_urls(year)
         # Download each zip
         for url in urls:
+            name = re.sub("\D", "", url.split('_')[0])
+            if '{}/{}'.format(year, name) in current_keys:
+                continue
+            log.info('Working on {}'.format(name))
+
             local_path = os.path.join(folder_path, url)
             # Get and download zip
             resp = requests.get(BASE_URL.format(year) + url)
@@ -61,13 +77,12 @@ def download(start_year, end_year, storage_location='patent_xml_zipped'):
             f.write(resp.content)
             f.close()
             # Upload to S3
-
-            name = re.sub("\D", "", url.split('_')[0])
             push_to_s3(local_path, year, name)
             log.info("Pushed %s", "{}_{}".format(year, name))
-
+            down_f.write("{}/{}".format(year, name))
             # Remove file
             os.remove(local_path)
+    down_f.close()
     return
 
 
