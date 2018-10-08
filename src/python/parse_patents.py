@@ -1,7 +1,7 @@
 """
 The main run script of the pipeline. It includes a main function that is used in spark submit.
 """
-
+import datetime
 import io
 import logging
 import os
@@ -168,6 +168,7 @@ def download_from_s3(key, output_name=None, bucket=None):
             raise
     return output_name
 
+
 def process(key):
     """
     Applys an ETL pipeline for patents on a particular key from a S3 bucket
@@ -229,6 +230,7 @@ def to_neo4j(csv_edges, table='patents'):
     :param table: The string that dictates which table will be used to get node information
     :return:
     """
+    embed()
     # Set-Up Patents
     driver = GraphDatabase.driver(os.getenv("NEO4J_URI"), auth=("neo4j", os.getenv("NEO4J_PASSWORD")))
     session = driver.session()
@@ -251,39 +253,49 @@ def to_neo4j(csv_edges, table='patents'):
     # Upload data
     cur = conn.cursor()
     query = "Select patent_number, title, owner, abstract From %s where patent_number in (%s)" % (
-    table, ', '.join(new_numbers))
+        table, ', '.join(new_numbers))
     with open('/home/ubuntu/tmp_nodes.txt', 'w') as f:
         # with open('tmp_nodes.txt', 'w') as f:
         cur.copy_expert("copy ({}) to stdout with csv header".format(query), f)
 
+    patents_from_db = []
+    data = {'patents': []}
+    lines = open('/home/ubuntu/tmp_nodes').readlines()
+    for line in lines:
+        line = line.strip().split('\t')
+        patents_from_db.append(line[0])
+        data['patents'].append({'patent_number': line[0], 'title': line[1], 'owner': line[2], 'abstract': line[3]})
     # load node data
     query = '''
-    LOAD CSV WITH HEADERS FROM "file:///home/ubunutu/tmp_nodes.txt"
-    AS csvLine
-    MERGE (p: Patent {patent_number: csvLine.patent_number })
-    ON CREATE SET p = {patent_number: csvLine.patent_number, title: csvLine.title, owner: csvLine.owner, 
-    abstract: csvLine.abstract}
-    ON MATCH SET p += {patent_number: csvLine.patent_number, title: csvLine.title, owner: csvLine.owner, 
-    abstract: csvLine.abstract}'''
+    UNWIND $data AS data
+    MERGE (p: Patent {patent_number: data.patent_number })
+    ON CREATE SET p = {patent_number: data.patent_number, title: data.title, owner: data.owner, 
+    abstract: data.abstract}
+    ON MATCH SET p += {patent_number: data.patent_number, title: data.title, owner: data.owner, 
+    abstract: data.abstract}'''
     session.run(query)
 
     # Set up Patent Relationships
-    # session.sync()
-    f = open('/home/ubuntu/tmp_edges.txt', 'w')
-    f.write(csv_edges)
-    f.close()
+    data = {'links': []}
+    lines = csv_edges.split('\n')
+    for line in lines:
+        line = line.strip().split('\t')
+        # limit edges that do not exist in DB
+        if line[0] not in patents_from_db:
+            continue
+        if line[1] not in patents_from_db:
+            continue
+        data['links'].append({'citation': line[1], 'patent_number': line[0]})
 
     query = '''
-    LOAD CSV WITH HEADERS FROM "file:///home/ubuntu/tmp_edges.txt"
-    AS csvLine
-    MERGE (f: Patent {patent_number: csvLine.patent_number})
-    MERGE (t: Patent {patent_number: csvLine.citation})
+    UNWIND $data AS data
+    MERGE (f: Patent {patent_number: data.patent_number})
+    MERGE (t: Patent {patent_number: data.citation})
     MERGE (f)-[:CITES]->(t)
     '''
     session.run(query)
     session.sync()
     os.remove('/home/ubuntu/tmp_nodes.txt')
-    os.remove('/home/ubuntu/tmp_edges.txt')
 
 
 def nonbulk_process():
@@ -291,10 +303,8 @@ def nonbulk_process():
     Processes files in a processive non-spark manner.
     :return:
     """
-    keys = open("downloaded_files.txt").readlines()
-    print('KEYS! {}'.format(keys))
+    date = datetime.date.today().day
     for key in keys:
-        print('processing {}'.format(key))
         edges = process(key.strip())
         # Push edges to Neo4j
         to_neo4j(edges)

@@ -1,3 +1,4 @@
+import datetime
 import logging
 import os
 import re
@@ -6,6 +7,7 @@ import urllib.request
 
 import boto3
 import requests
+from IPython import embed
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("download-log")
@@ -28,11 +30,12 @@ def get_urls(year):
     return urls
 
 
-def download(start_year, end_year, storage_location='patent_xml_zipped', bucket='patent-xml-zipped'):
+def download(start_year, end_year, current_date=None, storage_location='patent_xml_zipped', bucket='patent-xml-zipped'):
     """
     Locally downloads the patent data
     :param start_year: the first year that will be retrieved
     :param end_year: the last year that will be retrieved
+    :param current_date: Specifies if it should only look for a single file at the current date, must be a Tuesday
     :param storage_location: the folder where everything should be stored
     :param bucket: the S3 Bucket
     :return:
@@ -51,7 +54,40 @@ def download(start_year, end_year, storage_location='patent_xml_zipped', bucket=
         if ".json" in my_object.key:
             continue
         current_keys.append(my_object.key)
-    down_f = open("downloaded_files.txt", 'w')
+
+    # Special mode for only downloading a single week
+    if current_date is not None:
+        date = datetime.date.today().day
+        month = datetime.date.today().month
+
+        year = start_year
+        folder_path = os.path.join(storage_location, str(year))
+        # Get appropriate urls
+        urls = get_urls(year)
+        # Download each zip
+        for url in urls:
+            name = re.sub("\D", "", url.split('_')[0])
+            if '{}/{}'.format(year, name) in current_keys:
+                continue
+            if str(month).zfill(2) == name[-4:-2]:
+                # if '02' == name[-2:]:
+                if str(date).zfill(2) == name[-2:]:
+                    log.info('Working on {}'.format(name))
+                    local_path = os.path.join(folder_path, url)
+                    # Get and download zip
+                    resp = requests.get(BASE_URL.format(year) + url)
+                    f = open(local_path, 'wb')
+                    f.write(resp.content)
+                    f.close()
+                    # Upload to S3
+                    push_to_s3(local_path, year, name)
+                    log.info("Pushed %s", "{}_{}".format(year, name))
+
+                    # Remove file
+                    os.remove(local_path)
+                    return
+        log.info('No Date matched')
+        return
 
     # retrieve each week for a particular year that hasn't been downloaded
     for year in range(start_year, end_year + 1):
@@ -79,10 +115,10 @@ def download(start_year, end_year, storage_location='patent_xml_zipped', bucket=
             # Upload to S3
             push_to_s3(local_path, year, name)
             log.info("Pushed %s", "{}_{}".format(year, name))
-            down_f.write("{}/{}".format(year, name))
+
             # Remove file
             os.remove(local_path)
-    down_f.close()
+
     return
 
 
@@ -105,4 +141,7 @@ def push_to_s3(file, year, name, bucket='patent-xml-zipped'):
 
 
 if __name__ == '__main__':
-    download(int(sys.argv[1]), int(sys.argv[2]))
+    if len(sys.argv) == 4:
+        download(int(sys.argv[1]), int(sys.argv[2]), sys.argv[3])
+    else:
+        download(int(sys.argv[1]), int(sys.argv[2]))
