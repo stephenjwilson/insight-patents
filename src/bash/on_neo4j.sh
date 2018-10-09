@@ -10,7 +10,7 @@ array=(edges_*/p*)
 cat ${array[@]} > combined_edges.csv
 psql -h test-db2.co89ijjtewjb.us-east-1.rds.amazonaws.com -p 5432 -U swilson patent_data -c "\copy (Select patent_number, title From patents) To '/var/lib/neo4j/data/neo4jEdges/tmp.csv' With CSV"
 
-python3 ~/insight-patents/src/python/quick_nodes.py tmp.csv combined_edges.csv #python3 ~/insight-patents/src/python/quick_nodes.py combined_edges.csv nodes.csv
+python3 ~/insight-patents/src/python/quick_nodes.py tmp.csv combined_edges.csv #python3 ~/insight-patents/src/python/filter_edges.py combined_edges.csv nodes.csv
 #awk -F',' '{print $1}' combined_edges.csv | uniq -u > tmpNodes1
 #awk -F',' '{print $2}' combined_edges.csv | uniq -u > tmpNodes2
 #cat tmpNodes2 tmpNodes2 | uniq -u > toaddNodes
