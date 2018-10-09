@@ -57,11 +57,14 @@ def download(start_year, end_year, current_date=None, storage_location='patent_x
 
     # Special mode for only downloading a single week
     if current_date is not None:
-        date = datetime.date.today().day
-        month = datetime.date.today().month
-
-        year = start_year
+        date = datetime.datetime.strptime(current_date, "%Y%m%d")
+        year = str(date.year)
         folder_path = os.path.join(storage_location, str(year))
+        try:
+            os.mkdir(folder_path)
+        except FileExistsError:
+            pass
+
         # Get appropriate urls
         urls = get_urls(year)
         # Download each zip
@@ -69,13 +72,14 @@ def download(start_year, end_year, current_date=None, storage_location='patent_x
             name = re.sub("\D", "", url.split('_')[0])
             if '{}/{}'.format(year, name) in current_keys:
                 continue
-            if str(month).zfill(2) == name[-4:-2]:
+            if str(date.month).zfill(2) == name[-4:-2]:
                 # if '02' == name[-2:]:
-                if str(date).zfill(2) == name[-2:]:
+                if str(date.day).zfill(2) == name[-2:]:
                     log.info('Working on {}'.format(name))
                     local_path = os.path.join(folder_path, url)
                     # Get and download zip
                     resp = requests.get(BASE_URL.format(year) + url)
+                    
                     f = open(local_path, 'wb')
                     f.write(resp.content)
                     f.close()

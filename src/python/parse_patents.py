@@ -3,6 +3,7 @@ The main run script of the pipeline. It includes a main function that is used in
 """
 import datetime
 import io
+import json
 import logging
 import os
 import zipfile
@@ -230,7 +231,8 @@ def to_neo4j(csv_edges, table='patents'):
     :param table: The string that dictates which table will be used to get node information
     :return:
     """
-    embed()
+
+    #embed()
     # Set-Up Patents
     driver = GraphDatabase.driver(os.getenv("NEO4J_URI"), auth=("neo4j", os.getenv("NEO4J_PASSWORD")))
     session = driver.session()
@@ -260,20 +262,24 @@ def to_neo4j(csv_edges, table='patents'):
 
     patents_from_db = []
     data = {'patents': []}
-    lines = open('/home/ubuntu/tmp_nodes').readlines()
-    for line in lines:
-        line = line.strip().split('\t')
+    lines = open('/home/ubuntu/tmp_nodes.txt').readlines()
+    for line in lines[1:]:
+        line = line.strip('\n').split(',')
+        if len(line) < 4:
+            print(line)
+            continue
         patents_from_db.append(line[0])
         data['patents'].append({'patent_number': line[0], 'title': line[1], 'owner': line[2], 'abstract': line[3]})
     # load node data
     query = '''
-    UNWIND $data AS data
+    WITH {data} as q
+    UNWIND q.patents AS data
     MERGE (p: Patent {patent_number: data.patent_number })
     ON CREATE SET p = {patent_number: data.patent_number, title: data.title, owner: data.owner, 
     abstract: data.abstract}
     ON MATCH SET p += {patent_number: data.patent_number, title: data.title, owner: data.owner, 
     abstract: data.abstract}'''
-    session.run(query)
+    session.run(query, parameters={'data': data})
 
     # Set up Patent Relationships
     data = {'links': []}
@@ -288,26 +294,43 @@ def to_neo4j(csv_edges, table='patents'):
         data['links'].append({'citation': line[1], 'patent_number': line[0]})
 
     query = '''
-    UNWIND $data AS data
+    WITH {data} as q
+    UNWIND q.links AS data
     MERGE (f: Patent {patent_number: data.patent_number})
     MERGE (t: Patent {patent_number: data.citation})
     MERGE (f)-[:CITES]->(t)
     '''
-    session.run(query)
+    session.run(query, parameters={'data':data})
     session.sync()
     os.remove('/home/ubuntu/tmp_nodes.txt')
 
 
-def nonbulk_process():
+def nonbulk_process(date):
     """
     Processes files in a processive non-spark manner.
     :return:
     """
-    date = datetime.date.today().day
-    for key in keys:
-        edges = process(key.strip())
-        # Push edges to Neo4j
-        to_neo4j(edges)
+    date = datetime.datetime.strptime(date, "%Y%m%d")
+    s3 = boto3.resource('s3')
+    my_bucket = s3.Bucket(BUCKET_NAME)
+    keys_to_process = []
+    for my_object in my_bucket.objects.all():
+        if ".json" in my_object.key:
+            continue
+        # 2001 files are available in two formats. Don't use the SGML format
+        if my_object.key.split('/')[1][:2] == '01':
+            continue
+        keys_to_process.append(my_object.key)
+    #embed()
+    for key in keys_to_process:
+        if str(date.year)[-2:]!= key[-6:-4]:
+            continue
+        print(key, str(date.month).zfill(2),key[-4:-2])
+        if str(date.month).zfill(2) == key[-4:-2]:
+            if str(date.day).zfill(2) == key[-2:]:
+                edges = process(key.strip())
+                # Push edges to Neo4j
+                to_neo4j(edges)
 
 
 def chunks(l, n):
@@ -321,7 +344,8 @@ def chunks(l, n):
 @click.option('--bulk', default=True, type=bool,
               help='''Processes the files based on all possible files on the S3 if True. 
               If False, the pipeline will use the keys in the local file: downloaded_files.txt''')
-def main(local, bulk):
+@click.option('--date', default=None, help='This is the date to focus on in non-bulk mode.')
+def main(local, bulk, date):
     """
     Main Function that downloads, decompresses, and parses the USTPO XML data before dumping it into a
     PostgreSQL and a Neo4j database.
@@ -334,7 +358,8 @@ def main(local, bulk):
     # Don't create a spark job if updating a few files
 
     if not bulk:
-        nonbulk_process()
+        if date is not None:
+            nonbulk_process(date)
         return
 
     # Get list of keys to process
