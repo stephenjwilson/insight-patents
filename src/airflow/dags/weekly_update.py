@@ -11,7 +11,7 @@ airflow_args = {
     'retry_delay': timedelta(minutes=1)
 }
 
-dag = DAG('airflow_weekly', default_args=airflow_args, schedule_interval='@weekly')
+dag = DAG('airflow_weekly', default_args=airflow_args, schedule_interval='0 14 * * TUE')
 now = datetime.now()
 
 download_data = BashOperator(task_id='download_data',

@@ -1,10 +1,13 @@
+# PATENTLINK
+
 # Table of Contents
 1. [Introduction](README.md#introduction)
 2. [Approach](README.md#approach)
 3. [Requirements](README.md#requirements)
 4. [Running the code](README.md#running-the-code)
-5. [Testing](README.md#testing)
-6. [Author](README.md#author)
+5. [Troubleshooting configuration issues](README.MD#troubleshooting-configuration-issues)
+6. [Testing](README.md#testing)
+7. [Author](README.md#author)
 
 # Introduction
 Patents determine the exclusive right to produce, market, and sell a design. Patents
@@ -127,11 +130,11 @@ bash ./src/bash/run_airflow.sh
 ```
 
 
-## Troubleshooting configuration issues
+# Troubleshooting configuration issues
 In the [vars folder](./vars), there are configuration files for spark, hadoop, and airflow. If there is a configuration
 error, please consult them for potential differences with your setup.
 
-## Testing
+# Testing
   
 Tests can be run by running with:
 ```bash
